@@ -10,6 +10,9 @@ enum Pace: String, Codable, CaseIterable, Identifiable {
 
 @Model
 final class Trip {
+    #Unique<Trip>([\.id])
+    #Index<Trip>([\.startDate])
+
     var id: UUID
     var name: String
     var destination: String

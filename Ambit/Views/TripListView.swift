@@ -21,6 +21,7 @@ struct TripListView: View {
                 .onDelete(perform: deleteTrips)
             }
             .navigationTitle("Trips")
+            .navigationSubtitle(trips.isEmpty ? "" : "\(trips.count) planned")
             .navigationDestination(for: Trip.self) { trip in
                 TripDetailView(trip: trip)
             }
@@ -29,6 +30,7 @@ struct TripListView: View {
                     Button(action: { isPresentingNewTrip = true }) {
                         Label("New Trip", systemImage: "plus")
                     }
+                    .buttonStyle(.glassProminent)
                 }
             }
             .sheet(isPresented: $isPresentingNewTrip) {

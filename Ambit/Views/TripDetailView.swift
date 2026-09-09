@@ -24,6 +24,7 @@ struct TripDetailView: View {
             }
         }
         .navigationTitle(trip.name)
+        .navigationSubtitle(trip.destination)
     }
 }
 
@@ -31,15 +32,17 @@ private struct StopRow: View {
     let stop: Stop
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Image(systemName: icon(for: stop.category))
+        HStack {
+            Image(systemName: icon(for: stop.category))
+                .frame(width: 28, height: 28)
+                .glassEffect(.regular.interactive(), in: .circle)
+            VStack(alignment: .leading, spacing: 2) {
                 Text(stop.name).font(.body)
-            }
-            if let time = stop.plannedTime {
-                Text(time.formatted(date: .omitted, time: .shortened))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let time = stop.plannedTime {
+                    Text(time.formatted(date: .omitted, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }

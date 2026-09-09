@@ -11,6 +11,9 @@ enum StopCategory: String, Codable, CaseIterable, Identifiable {
 
 @Model
 final class Stop {
+    #Unique<Stop>([\.id])
+    #Index<Stop>([\.sortOrder])
+
     var id: UUID
     var name: String
     var category: StopCategory

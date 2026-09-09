@@ -3,6 +3,9 @@ import SwiftData
 
 @Model
 final class Day {
+    #Unique<Day>([\.id])
+    #Index<Day>([\.date])
+
     var id: UUID
     var date: Date
 

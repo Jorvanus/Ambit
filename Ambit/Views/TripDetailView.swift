@@ -11,20 +11,73 @@ struct TripDetailView: View {
     var body: some View {
         List {
             ForEach(sortedDays) { day in
-                Section(day.date.formatted(date: .abbreviated, time: .omitted)) {
-                    let stops = day.stops.sorted { $0.sortOrder < $1.sortOrder }
-                    if stops.isEmpty {
-                        Text("No stops yet").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(stops) { stop in
-                            StopRow(stop: stop)
-                        }
-                    }
-                }
+                DaySection(day: day)
             }
         }
         .navigationTitle(trip.name)
         .navigationSubtitle(trip.destination)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                EditButton()
+            }
+        }
+    }
+}
+
+private struct DaySection: View {
+    @Bindable var day: Day
+
+    @Environment(\.modelContext) private var modelContext
+    @State private var isPresentingAddStop = false
+
+    private var stops: [Stop] {
+        day.stops.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    var body: some View {
+        Section {
+            if stops.isEmpty {
+                Text("No stops yet").foregroundStyle(.secondary)
+            } else {
+                ForEach(stops) { stop in
+                    StopRow(stop: stop)
+                }
+                .onDelete(perform: deleteStops)
+                .onMove(perform: moveStops)
+            }
+            Button {
+                isPresentingAddStop = true
+            } label: {
+                Label("Add Stop", systemImage: "plus")
+            }
+        } header: {
+            Text(day.date.formatted(date: .abbreviated, time: .omitted))
+        }
+        .sheet(isPresented: $isPresentingAddStop) {
+            AddStopView(day: day)
+        }
+    }
+
+    private func deleteStops(at offsets: IndexSet) {
+        let stopsToDelete = offsets.map { stops[$0] }
+        for stop in stopsToDelete {
+            modelContext.delete(stop)
+        }
+        reindexSortOrder()
+    }
+
+    private func moveStops(from source: IndexSet, to destination: Int) {
+        var reordered = stops
+        reordered.move(fromOffsets: source, toOffset: destination)
+        for (index, stop) in reordered.enumerated() {
+            stop.sortOrder = index
+        }
+    }
+
+    private func reindexSortOrder() {
+        for (index, stop) in stops.enumerated() {
+            stop.sortOrder = index
+        }
     }
 }
 

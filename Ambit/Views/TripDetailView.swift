@@ -39,16 +39,32 @@ private struct DaySection: View {
             if stops.isEmpty {
                 Text("No stops yet").foregroundStyle(.secondary)
             } else {
-                ForEach(stops) { stop in
-                    StopRow(stop: stop)
+                ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
+                    StopRow(
+                        stop: stop,
+                        walkingTimeToNext: index < stops.count - 1
+                            ? RouteOptimizer.walkingTime(from: stop, to: stops[index + 1])
+                            : nil
+                    )
                 }
                 .onDelete(perform: deleteStops)
                 .onMove(perform: moveStops)
             }
-            Button {
-                isPresentingAddStop = true
-            } label: {
-                Label("Add Stop", systemImage: "plus")
+            HStack {
+                Button {
+                    isPresentingAddStop = true
+                } label: {
+                    Label("Add Stop", systemImage: "plus")
+                }
+                Spacer()
+                if locatableStopCount > 1 {
+                    Button {
+                        optimizeOrder()
+                    } label: {
+                        Label("Optimize", systemImage: "arrow.triangle.swap")
+                    }
+                    .font(.caption)
+                }
             }
         } header: {
             Text(day.date.formatted(date: .abbreviated, time: .omitted))
@@ -56,6 +72,10 @@ private struct DaySection: View {
         .sheet(isPresented: $isPresentingAddStop) {
             AddStopView(day: day)
         }
+    }
+
+    private var locatableStopCount: Int {
+        stops.filter { $0.hasCoordinate }.count
     }
 
     private func deleteStops(at offsets: IndexSet) {
@@ -79,23 +99,39 @@ private struct DaySection: View {
             stop.sortOrder = index
         }
     }
+
+    private func optimizeOrder() {
+        let optimized = RouteOptimizer.optimizedOrder(for: stops)
+        for (index, stop) in optimized.enumerated() {
+            stop.sortOrder = index
+        }
+    }
 }
 
 private struct StopRow: View {
     let stop: Stop
+    let walkingTimeToNext: TimeInterval?
 
     var body: some View {
-        HStack {
-            Image(systemName: icon(for: stop.category))
-                .frame(width: 28, height: 28)
-                .glassEffect(.regular.interactive(), in: .circle)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(stop.name).font(.body)
-                if let time = stop.plannedTime {
-                    Text(time.formatted(date: .omitted, time: .shortened))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: icon(for: stop.category))
+                    .frame(width: 28, height: 28)
+                    .glassEffect(.regular.interactive(), in: .circle)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stop.name).font(.body)
+                    if let time = stop.plannedTime {
+                        Text(time.formatted(date: .omitted, time: .shortened))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            }
+            if let walkingTimeToNext {
+                Label("\(Int((walkingTimeToNext / 60).rounded())) min walk to next stop", systemImage: "figure.walk")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 36)
             }
         }
     }

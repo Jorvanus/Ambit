@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import SwiftData
 
@@ -48,5 +49,17 @@ final class Stop {
         self.notes = notes
         self.isBackup = isBackup
         self.sortOrder = sortOrder
+    }
+
+    var hasCoordinate: Bool {
+        latitude != 0 || longitude != 0
+    }
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    var location: CLLocation {
+        CLLocation(latitude: latitude, longitude: longitude)
     }
 }

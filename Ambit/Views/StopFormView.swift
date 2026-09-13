@@ -3,22 +3,35 @@ import MapKit
 import SwiftUI
 import SwiftData
 
-struct AddStopView: View {
+struct StopFormView: View {
     @Bindable var day: Day
+    var existingStop: Stop?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
-    @State private var name = ""
-    @State private var category: StopCategory = .sight
-    @State private var hasPlannedTime = false
-    @State private var plannedTime = Date()
-    @State private var durationMinutes = 60.0
-    @State private var notes = ""
+    @State private var name: String
+    @State private var category: StopCategory
+    @State private var hasPlannedTime: Bool
+    @State private var plannedTime: Date
+    @State private var durationMinutes: Double
+    @State private var notes: String
 
     @State private var coordinate: CLLocationCoordinate2D?
     @State private var isLocating = false
     @State private var locationNotFound = false
+
+    init(day: Day, existingStop: Stop? = nil) {
+        self.day = day
+        self.existingStop = existingStop
+        _name = State(initialValue: existingStop?.name ?? "")
+        _category = State(initialValue: existingStop?.category ?? .sight)
+        _hasPlannedTime = State(initialValue: existingStop?.plannedTime != nil)
+        _plannedTime = State(initialValue: existingStop?.plannedTime ?? Date())
+        _durationMinutes = State(initialValue: (existingStop?.durationEstimate ?? 3600) / 60)
+        _notes = State(initialValue: existingStop?.notes ?? "")
+        _coordinate = State(initialValue: existingStop?.hasCoordinate == true ? existingStop?.coordinate : nil)
+    }
 
     var body: some View {
         NavigationStack {
@@ -76,14 +89,19 @@ struct AddStopView: View {
                 Section("Notes") {
                     TextField("e.g. booking required", text: $notes, axis: .vertical)
                 }
+                if existingStop != nil {
+                    Section {
+                        Button("Delete Stop", role: .destructive) { delete() }
+                    }
+                }
             }
-            .navigationTitle("New Stop")
+            .navigationTitle(existingStop == nil ? "New Stop" : "Edit Stop")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
+                    Button(existingStop == nil ? "Add" : "Save") {
                         Task { await save() }
                     }
                     .buttonStyle(.glassProminent)
@@ -105,23 +123,40 @@ struct AddStopView: View {
         if coordinate == nil {
             await locate()
         }
-        let stop = Stop(
-            name: name,
-            category: category,
-            latitude: coordinate?.latitude ?? 0,
-            longitude: coordinate?.longitude ?? 0,
-            plannedTime: hasPlannedTime ? plannedTime : nil,
-            durationEstimate: durationMinutes * 60,
-            notes: notes,
-            sortOrder: day.stops.count
-        )
-        stop.day = day
-        modelContext.insert(stop)
+        if let existingStop {
+            existingStop.name = name
+            existingStop.category = category
+            existingStop.plannedTime = hasPlannedTime ? plannedTime : nil
+            existingStop.durationEstimate = durationMinutes * 60
+            existingStop.notes = notes
+            existingStop.latitude = coordinate?.latitude ?? 0
+            existingStop.longitude = coordinate?.longitude ?? 0
+        } else {
+            let stop = Stop(
+                name: name,
+                category: category,
+                latitude: coordinate?.latitude ?? 0,
+                longitude: coordinate?.longitude ?? 0,
+                plannedTime: hasPlannedTime ? plannedTime : nil,
+                durationEstimate: durationMinutes * 60,
+                notes: notes,
+                sortOrder: day.stops.count
+            )
+            stop.day = day
+            modelContext.insert(stop)
+        }
+        dismiss()
+    }
+
+    private func delete() {
+        if let existingStop {
+            modelContext.delete(existingStop)
+        }
         dismiss()
     }
 }
 
 #Preview {
-    AddStopView(day: Day(date: .now))
+    StopFormView(day: Day(date: .now))
         .modelContainer(for: [Trip.self, Day.self, Stop.self], inMemory: true)
 }

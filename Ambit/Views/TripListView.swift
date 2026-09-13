@@ -34,7 +34,7 @@ struct TripListView: View {
                 }
             }
             .sheet(isPresented: $isPresentingNewTrip) {
-                NewTripView()
+                TripFormView()
             }
             .overlay {
                 if trips.isEmpty {

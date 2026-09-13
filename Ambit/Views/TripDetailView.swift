@@ -4,6 +4,8 @@ import SwiftData
 struct TripDetailView: View {
     @Bindable var trip: Trip
 
+    @State private var isPresentingEditTrip = false
+
     private var sortedDays: [Day] {
         trip.days.sorted { $0.date < $1.date }
     }
@@ -18,8 +20,18 @@ struct TripDetailView: View {
         .navigationSubtitle(trip.destination)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                Button {
+                    isPresentingEditTrip = true
+                } label: {
+                    Label("Edit Trip", systemImage: "pencil")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
                 EditButton()
             }
+        }
+        .sheet(isPresented: $isPresentingEditTrip) {
+            TripFormView(existingTrip: trip)
         }
     }
 }
@@ -29,6 +41,7 @@ private struct DaySection: View {
 
     @Environment(\.modelContext) private var modelContext
     @State private var isPresentingAddStop = false
+    @State private var editingStop: Stop?
 
     private var stops: [Stop] {
         day.stops.sorted { $0.sortOrder < $1.sortOrder }
@@ -46,6 +59,8 @@ private struct DaySection: View {
                             ? RouteOptimizer.walkingTime(from: stop, to: stops[index + 1])
                             : nil
                     )
+                    .contentShape(Rectangle())
+                    .onTapGesture { editingStop = stop }
                 }
                 .onDelete(perform: deleteStops)
                 .onMove(perform: moveStops)
@@ -70,7 +85,10 @@ private struct DaySection: View {
             Text(day.date.formatted(date: .abbreviated, time: .omitted))
         }
         .sheet(isPresented: $isPresentingAddStop) {
-            AddStopView(day: day)
+            StopFormView(day: day)
+        }
+        .sheet(item: $editingStop) { stop in
+            StopFormView(day: day, existingStop: stop)
         }
     }
 

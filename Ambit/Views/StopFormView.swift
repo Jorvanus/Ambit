@@ -17,6 +17,10 @@ struct StopFormView: View {
     @State private var durationMinutes: Double
     @State private var notes: String
 
+    @State private var bookingStatus: BookingStatus
+    @State private var confirmationNumber: String
+    @State private var bookingURLString: String
+
     @State private var coordinate: CLLocationCoordinate2D?
     @State private var isLocating = false
     @State private var locationNotFound = false
@@ -30,6 +34,9 @@ struct StopFormView: View {
         _plannedTime = State(initialValue: existingStop?.plannedTime ?? Date())
         _durationMinutes = State(initialValue: (existingStop?.durationEstimate ?? 3600) / 60)
         _notes = State(initialValue: existingStop?.notes ?? "")
+        _bookingStatus = State(initialValue: existingStop?.bookingStatus ?? .none)
+        _confirmationNumber = State(initialValue: existingStop?.confirmationNumber ?? "")
+        _bookingURLString = State(initialValue: existingStop?.bookingURLString ?? "")
         _coordinate = State(initialValue: existingStop?.hasCoordinate == true ? existingStop?.coordinate : nil)
     }
 
@@ -86,8 +93,28 @@ struct StopFormView: View {
                         step: 15
                     )
                 }
+                Section("Booking") {
+                    Picker("Status", selection: $bookingStatus) {
+                        ForEach(BookingStatus.allCases) { status in
+                            Text(status.label).tag(status)
+                        }
+                    }
+                    if bookingStatus != .none {
+                        TextField("Confirmation number", text: $confirmationNumber)
+                        TextField("Booking link", text: $bookingURLString)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        if let url = URL(string: bookingURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
+                           url.scheme?.hasPrefix("http") == true {
+                            Link(destination: url) {
+                                Label("Open Booking Link", systemImage: "arrow.up.forward.app")
+                            }
+                        }
+                    }
+                }
                 Section("Notes") {
-                    TextField("e.g. booking required", text: $notes, axis: .vertical)
+                    TextField("Add a note", text: $notes, axis: .vertical)
                 }
                 if existingStop != nil {
                     Section {
@@ -123,6 +150,8 @@ struct StopFormView: View {
         if coordinate == nil {
             await locate()
         }
+        let trimmedConfirmation = confirmationNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedURL = bookingURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         if let existingStop {
             existingStop.name = name
             existingStop.category = category
@@ -131,6 +160,9 @@ struct StopFormView: View {
             existingStop.notes = notes
             existingStop.latitude = coordinate?.latitude ?? 0
             existingStop.longitude = coordinate?.longitude ?? 0
+            existingStop.bookingStatus = bookingStatus
+            existingStop.confirmationNumber = trimmedConfirmation.isEmpty ? nil : trimmedConfirmation
+            existingStop.bookingURLString = trimmedURL.isEmpty ? nil : trimmedURL
         } else {
             let stop = Stop(
                 name: name,
@@ -140,7 +172,10 @@ struct StopFormView: View {
                 plannedTime: hasPlannedTime ? plannedTime : nil,
                 durationEstimate: durationMinutes * 60,
                 notes: notes,
-                sortOrder: day.stops.count
+                sortOrder: day.stops.count,
+                bookingStatus: bookingStatus,
+                confirmationNumber: trimmedConfirmation.isEmpty ? nil : trimmedConfirmation,
+                bookingURLString: trimmedURL.isEmpty ? nil : trimmedURL
             )
             stop.day = day
             modelContext.insert(stop)

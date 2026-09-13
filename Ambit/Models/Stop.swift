@@ -10,6 +10,33 @@ enum StopCategory: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum BookingStatus: String, Codable, CaseIterable, Identifiable {
+    case none
+    case required
+    case booked
+    case confirmed
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .none: return "No Booking Needed"
+        case .required: return "Booking Required"
+        case .booked: return "Booked"
+        case .confirmed: return "Confirmed"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .none: return ""
+        case .required: return "exclamationmark.circle.fill"
+        case .booked: return "ticket.fill"
+        case .confirmed: return "checkmark.circle.fill"
+        }
+    }
+}
+
 @Model
 final class Stop {
     #Unique<Stop>([\.id])
@@ -25,6 +52,9 @@ final class Stop {
     var notes: String
     var isBackup: Bool
     var sortOrder: Int
+    var bookingStatus: BookingStatus = BookingStatus.none
+    var confirmationNumber: String?
+    var bookingURLString: String?
 
     var day: Day?
 
@@ -37,7 +67,10 @@ final class Stop {
         durationEstimate: TimeInterval = 3600,
         notes: String = "",
         isBackup: Bool = false,
-        sortOrder: Int = 0
+        sortOrder: Int = 0,
+        bookingStatus: BookingStatus = .none,
+        confirmationNumber: String? = nil,
+        bookingURLString: String? = nil
     ) {
         self.id = UUID()
         self.name = name
@@ -49,6 +82,13 @@ final class Stop {
         self.notes = notes
         self.isBackup = isBackup
         self.sortOrder = sortOrder
+        self.bookingStatus = bookingStatus
+        self.confirmationNumber = confirmationNumber
+        self.bookingURLString = bookingURLString
+    }
+
+    var bookingURL: URL? {
+        bookingURLString.flatMap { URL(string: $0) }
     }
 
     var hasCoordinate: Bool {

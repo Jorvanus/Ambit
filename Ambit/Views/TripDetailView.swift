@@ -168,6 +168,11 @@ private struct StopRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                Spacer()
+                if stop.bookingStatus != .none {
+                    Image(systemName: stop.bookingStatus.icon)
+                        .foregroundStyle(bookingColor(for: stop.bookingStatus))
+                }
             }
             if let walkingTimeToNext {
                 Label("\(Int((walkingTimeToNext / 60).rounded())) min walk to next stop", systemImage: "figure.walk")
@@ -183,6 +188,15 @@ private struct StopRow: View {
         case .food: return "fork.knife"
         case .sight: return "camera"
         case .activity: return "figure.walk"
+        }
+    }
+
+    private func bookingColor(for status: BookingStatus) -> Color {
+        switch status {
+        case .none: return .clear
+        case .required: return .orange
+        case .booked: return .blue
+        case .confirmed: return .green
         }
     }
 }

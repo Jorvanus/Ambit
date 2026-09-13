@@ -42,9 +42,16 @@ private struct DaySection: View {
     @Environment(\.modelContext) private var modelContext
     @State private var isPresentingAddStop = false
     @State private var editingStop: Stop?
+    @State private var walkingTimes: [UUID: TimeInterval] = [:]
 
     private var stops: [Stop] {
         day.stops.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    /// Identifies the current stop order + coordinates, so walking times
+    /// are refetched when either changes but not on every unrelated redraw.
+    private var routeSignature: [String] {
+        stops.map { "\($0.id)|\($0.latitude)|\($0.longitude)" }
     }
 
     var body: some View {
@@ -56,7 +63,7 @@ private struct DaySection: View {
                     StopRow(
                         stop: stop,
                         walkingTimeToNext: index < stops.count - 1
-                            ? RouteOptimizer.walkingTime(from: stop, to: stops[index + 1])
+                            ? (walkingTimes[stop.id] ?? RouteOptimizer.walkingTime(from: stop, to: stops[index + 1]))
                             : nil
                     )
                     .contentShape(Rectangle())
@@ -90,6 +97,23 @@ private struct DaySection: View {
         .sheet(item: $editingStop) { stop in
             StopFormView(day: day, existingStop: stop)
         }
+        .task(id: routeSignature) {
+            await refreshWalkingTimes()
+        }
+    }
+
+    private func refreshWalkingTimes() async {
+        let currentStops = stops
+        var results: [UUID: TimeInterval] = [:]
+        for index in 0..<max(0, currentStops.count - 1) {
+            let from = currentStops[index]
+            let to = currentStops[index + 1]
+            guard from.hasCoordinate, to.hasCoordinate else { continue }
+            if let eta = await DirectionsService.walkingTravelTime(from: from.coordinate, to: to.coordinate) {
+                results[from.id] = eta
+            }
+        }
+        walkingTimes = results
     }
 
     private var locatableStopCount: Int {

@@ -11,6 +11,7 @@ private struct MapRoutePair: Identifiable {
 struct TripMapView: View {
     let trip: Trip
     @Binding var selectedDayID: UUID?
+    @Binding var selectedStopID: UUID?
 
     @State private var position: MapCameraPosition = .automatic
     @State private var walkingRoutes: [StopLegID: WalkingLeg] = [:]
@@ -63,7 +64,7 @@ struct TripMapView: View {
     }
 
     var body: some View {
-        Map(position: $position) {
+        Map(position: $position, selection: $selectedStopID) {
             ForEach(visibleDays) { day in
                 ForEach(routePairs(for: day).filter { walkingRoutes[$0.id]?.path.isEmpty == false }) { pair in
                     if let route = walkingRoutes[pair.id] {
@@ -81,16 +82,19 @@ struct TripMapView: View {
                             Text("\(index + 1)")
                                 .font(.caption.bold())
                                 .foregroundStyle(.white)
-                                .frame(width: 26, height: 26)
-                                .background(color(for: day), in: .circle)
-                                .overlay(Circle().stroke(.white, lineWidth: 2))
+                                .frame(width: selectedStopID == stop.id ? 34 : 26, height: selectedStopID == stop.id ? 34 : 26)
+                                .background(selectedStopID == stop.id ? Color.accentColor : color(for: day), in: .circle)
+                                .overlay(Circle().stroke(.white, lineWidth: selectedStopID == stop.id ? 4 : 2))
+                                .shadow(color: selectedStopID == stop.id ? .black.opacity(0.25) : .clear, radius: 5, y: 2)
                         }
+                        .tag(stop.id)
                     }
                 }
             }
             ForEach(savedPlaces) { place in
                 Marker(place.name, systemImage: "bookmark.fill", coordinate: place.coordinate)
                     .tint(.gray)
+                    .tag(place.id)
             }
         }
         .overlay {

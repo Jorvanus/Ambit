@@ -1,9 +1,18 @@
 import SwiftUI
 import SwiftData
 
+private enum TripTab: String, CaseIterable, Identifiable {
+    case itinerary = "Itinerary"
+    case map = "Map"
+    case budget = "Budget"
+
+    var id: String { rawValue }
+}
+
 struct TripDetailView: View {
     @Bindable var trip: Trip
 
+    @State private var tab: TripTab = .itinerary
     @State private var isPresentingEditTrip = false
 
     private var sortedDays: [Day] {
@@ -11,10 +20,30 @@ struct TripDetailView: View {
     }
 
     var body: some View {
-        List {
-            ForEach(sortedDays) { day in
-                DaySection(day: day)
+        Group {
+            switch tab {
+            case .itinerary:
+                List {
+                    PlacesSection(trip: trip)
+                    ForEach(sortedDays) { day in
+                        DaySection(trip: trip, day: day)
+                    }
+                }
+            case .map:
+                TripMapView(trip: trip)
+            case .budget:
+                TripBudgetView(trip: trip)
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Picker("Section", selection: $tab) {
+                ForEach(TripTab.allCases) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
         }
         .navigationTitle(trip.name)
         .navigationSubtitle(trip.destination)
@@ -26,8 +55,10 @@ struct TripDetailView: View {
                     Label("Edit Trip", systemImage: "pencil")
                 }
             }
-            ToolbarItem(placement: .primaryAction) {
-                EditButton()
+            if tab == .itinerary {
+                ToolbarItem(placement: .primaryAction) {
+                    EditButton()
+                }
             }
         }
         .sheet(isPresented: $isPresentingEditTrip) {
@@ -36,13 +67,59 @@ struct TripDetailView: View {
     }
 }
 
+private struct PlacesSection: View {
+    @Bindable var trip: Trip
+
+    @Environment(\.modelContext) private var modelContext
+    @State private var isPresentingAdd = false
+    @State private var editingStop: Stop?
+
+    private var places: [Stop] {
+        trip.savedPlaces.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    var body: some View {
+        Section {
+            if places.isEmpty {
+                Text("Save places now, schedule them on a day later.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(places) { place in
+                    StopRow(stop: place, walkingTimeToNext: nil)
+                        .contentShape(Rectangle())
+                        .onTapGesture { editingStop = place }
+                }
+                .onDelete { offsets in
+                    for place in offsets.map({ places[$0] }) {
+                        modelContext.delete(place)
+                    }
+                }
+            }
+            Button {
+                isPresentingAdd = true
+            } label: {
+                Label("Add Place", systemImage: "plus")
+            }
+        } header: {
+            Label("Places to visit", systemImage: "bookmark")
+        }
+        .sheet(isPresented: $isPresentingAdd) {
+            StopFormView(trip: trip)
+        }
+        .sheet(item: $editingStop) { place in
+            StopFormView(trip: trip, existingStop: place)
+        }
+    }
+}
+
 private struct DaySection: View {
+    let trip: Trip
     @Bindable var day: Day
 
     @Environment(\.modelContext) private var modelContext
     @State private var isPresentingAddStop = false
     @State private var editingStop: Stop?
-    @State private var walkingTimes: [UUID: TimeInterval] = [:]
+    @State private var legs: [UUID: WalkingLeg] = [:]
 
     private var stops: [Stop] {
         day.stops.sorted { $0.sortOrder < $1.sortOrder }
@@ -54,20 +131,50 @@ private struct DaySection: View {
         stops.map { "\($0.id)|\($0.latitude)|\($0.longitude)" }
     }
 
+    private func walkingTime(after index: Int) -> TimeInterval? {
+        guard index < stops.count - 1 else { return nil }
+        let stop = stops[index]
+        return legs[stop.id]?.time ?? RouteOptimizer.walkingTime(from: stop, to: stops[index + 1])
+    }
+
+    private var summary: String {
+        var parts = ["\(stops.count) \(stops.count == 1 ? "stop" : "stops")"]
+        var time: TimeInterval = 0
+        var distance: Double = 0
+        var hasLegs = false
+        for index in 0..<max(0, stops.count - 1) {
+            let from = stops[index]
+            let to = stops[index + 1]
+            guard from.hasCoordinate, to.hasCoordinate else { continue }
+            hasLegs = true
+            if let leg = legs[from.id] {
+                time += leg.time
+                distance += leg.distance
+            } else {
+                time += RouteOptimizer.walkingTime(from: from, to: to) ?? 0
+                distance += from.location.distance(from: to.location)
+            }
+        }
+        if hasLegs {
+            parts.append("\(Int((time / 60).rounded())) min walking")
+            parts.append(String(format: "%.1f km", distance / 1000))
+        }
+        let toBook = stops.filter { $0.bookingStatus == .required }.count
+        if toBook > 0 {
+            parts.append("\(toBook) to book")
+        }
+        return parts.joined(separator: " · ")
+    }
+
     var body: some View {
         Section {
             if stops.isEmpty {
                 Text("No stops yet").foregroundStyle(.secondary)
             } else {
                 ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
-                    StopRow(
-                        stop: stop,
-                        walkingTimeToNext: index < stops.count - 1
-                            ? (walkingTimes[stop.id] ?? RouteOptimizer.walkingTime(from: stop, to: stops[index + 1]))
-                            : nil
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture { editingStop = stop }
+                    StopRow(stop: stop, walkingTimeToNext: walkingTime(after: index))
+                        .contentShape(Rectangle())
+                        .onTapGesture { editingStop = stop }
                 }
                 .onDelete(perform: deleteStops)
                 .onMove(perform: moveStops)
@@ -89,31 +196,39 @@ private struct DaySection: View {
                 }
             }
         } header: {
-            Text(day.date.formatted(date: .abbreviated, time: .omitted))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(day.date.formatted(date: .abbreviated, time: .omitted))
+                if !stops.isEmpty {
+                    Text(summary)
+                        .font(.caption)
+                        .textCase(nil)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .sheet(isPresented: $isPresentingAddStop) {
-            StopFormView(day: day)
+            StopFormView(trip: trip, day: day)
         }
         .sheet(item: $editingStop) { stop in
-            StopFormView(day: day, existingStop: stop)
+            StopFormView(trip: trip, day: day, existingStop: stop)
         }
         .task(id: routeSignature) {
-            await refreshWalkingTimes()
+            await refreshLegs()
         }
     }
 
-    private func refreshWalkingTimes() async {
+    private func refreshLegs() async {
         let currentStops = stops
-        var results: [UUID: TimeInterval] = [:]
+        var results: [UUID: WalkingLeg] = [:]
         for index in 0..<max(0, currentStops.count - 1) {
             let from = currentStops[index]
             let to = currentStops[index + 1]
             guard from.hasCoordinate, to.hasCoordinate else { continue }
-            if let eta = await DirectionsService.walkingTravelTime(from: from.coordinate, to: to.coordinate) {
-                results[from.id] = eta
+            if let leg = await DirectionsService.walkingLeg(from: from.coordinate, to: to.coordinate) {
+                results[from.id] = leg
             }
         }
-        walkingTimes = results
+        legs = results
     }
 
     private var locatableStopCount: Int {

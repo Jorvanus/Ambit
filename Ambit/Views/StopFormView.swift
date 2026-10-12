@@ -4,7 +4,7 @@ import SwiftUI
 import SwiftData
 
 struct StopFormView: View {
-    @Bindable var day: Day
+    let trip: Trip
     var existingStop: Stop?
 
     @Environment(\.modelContext) private var modelContext
@@ -12,6 +12,7 @@ struct StopFormView: View {
 
     @State private var name: String
     @State private var category: StopCategory
+    @State private var selectedDayID: UUID?
     @State private var hasPlannedTime: Bool
     @State private var plannedTime: Date
     @State private var durationMinutes: Double
@@ -25,11 +26,14 @@ struct StopFormView: View {
     @State private var isLocating = false
     @State private var locationNotFound = false
 
-    init(day: Day, existingStop: Stop? = nil) {
-        self.day = day
+    /// `day` is where a new stop starts out; nil means "Places to visit".
+    /// When editing, the stop's own day wins.
+    init(trip: Trip, day: Day? = nil, existingStop: Stop? = nil) {
+        self.trip = trip
         self.existingStop = existingStop
         _name = State(initialValue: existingStop?.name ?? "")
         _category = State(initialValue: existingStop?.category ?? .sight)
+        _selectedDayID = State(initialValue: existingStop != nil ? existingStop?.day?.id : day?.id)
         _hasPlannedTime = State(initialValue: existingStop?.plannedTime != nil)
         _plannedTime = State(initialValue: existingStop?.plannedTime ?? Date())
         _durationMinutes = State(initialValue: (existingStop?.durationEstimate ?? 3600) / 60)
@@ -38,6 +42,10 @@ struct StopFormView: View {
         _confirmationNumber = State(initialValue: existingStop?.confirmationNumber ?? "")
         _bookingURLString = State(initialValue: existingStop?.bookingURLString ?? "")
         _coordinate = State(initialValue: existingStop?.hasCoordinate == true ? existingStop?.coordinate : nil)
+    }
+
+    private var sortedDays: [Day] {
+        trip.days.sorted { $0.date < $1.date }
     }
 
     var body: some View {
@@ -49,6 +57,13 @@ struct StopFormView: View {
                     Picker("Category", selection: $category) {
                         ForEach(StopCategory.allCases) { category in
                             Text(category.rawValue.capitalized).tag(category)
+                        }
+                    }
+                    Picker("Schedule", selection: $selectedDayID) {
+                        Text("Places to visit").tag(UUID?.none)
+                        ForEach(sortedDays) { day in
+                            Text(day.date.formatted(date: .abbreviated, time: .omitted))
+                                .tag(UUID?.some(day.id))
                         }
                     }
                 }
@@ -141,7 +156,7 @@ struct StopFormView: View {
     private func locate() async {
         isLocating = true
         locationNotFound = false
-        coordinate = await StopGeocoder.geocode(name: name, near: day.trip?.destination ?? "")
+        coordinate = await StopGeocoder.geocode(name: name, near: trip.destination)
         locationNotFound = coordinate == nil
         isLocating = false
     }
@@ -152,33 +167,40 @@ struct StopFormView: View {
         }
         let trimmedConfirmation = confirmationNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedURL = bookingURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetDay = selectedDayID.flatMap { id in trip.days.first { $0.id == id } }
+
+        let stop: Stop
         if let existingStop {
-            existingStop.name = name
-            existingStop.category = category
-            existingStop.plannedTime = hasPlannedTime ? plannedTime : nil
-            existingStop.durationEstimate = durationMinutes * 60
-            existingStop.notes = notes
-            existingStop.latitude = coordinate?.latitude ?? 0
-            existingStop.longitude = coordinate?.longitude ?? 0
-            existingStop.bookingStatus = bookingStatus
-            existingStop.confirmationNumber = trimmedConfirmation.isEmpty ? nil : trimmedConfirmation
-            existingStop.bookingURLString = trimmedURL.isEmpty ? nil : trimmedURL
+            stop = existingStop
         } else {
-            let stop = Stop(
-                name: name,
-                category: category,
-                latitude: coordinate?.latitude ?? 0,
-                longitude: coordinate?.longitude ?? 0,
-                plannedTime: hasPlannedTime ? plannedTime : nil,
-                durationEstimate: durationMinutes * 60,
-                notes: notes,
-                sortOrder: day.stops.count,
-                bookingStatus: bookingStatus,
-                confirmationNumber: trimmedConfirmation.isEmpty ? nil : trimmedConfirmation,
-                bookingURLString: trimmedURL.isEmpty ? nil : trimmedURL
-            )
-            stop.day = day
+            stop = Stop(name: name, category: category, latitude: 0, longitude: 0)
             modelContext.insert(stop)
+        }
+
+        stop.name = name
+        stop.category = category
+        stop.plannedTime = hasPlannedTime ? plannedTime : nil
+        stop.durationEstimate = durationMinutes * 60
+        stop.notes = notes
+        stop.latitude = coordinate?.latitude ?? 0
+        stop.longitude = coordinate?.longitude ?? 0
+        stop.bookingStatus = bookingStatus
+        stop.confirmationNumber = trimmedConfirmation.isEmpty ? nil : trimmedConfirmation
+        stop.bookingURLString = trimmedURL.isEmpty ? nil : trimmedURL
+
+        let isNewHome = existingStop == nil
+            || stop.day?.id != targetDay?.id
+            || (targetDay == nil && stop.poolTrip == nil)
+        if isNewHome {
+            if let targetDay {
+                stop.poolTrip = nil
+                stop.sortOrder = targetDay.stops.count
+                stop.day = targetDay
+            } else {
+                stop.day = nil
+                stop.sortOrder = trip.savedPlaces.count
+                stop.poolTrip = trip
+            }
         }
         dismiss()
     }
@@ -189,9 +211,4 @@ struct StopFormView: View {
         }
         dismiss()
     }
-}
-
-#Preview {
-    StopFormView(day: Day(date: .now))
-        .modelContainer(for: [Trip.self, Day.self, Stop.self], inMemory: true)
 }

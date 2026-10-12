@@ -24,6 +24,12 @@ final class Trip {
     @Relationship(deleteRule: .cascade, inverse: \Day.trip)
     var days: [Day] = []
 
+    @Relationship(deleteRule: .cascade, inverse: \Stop.poolTrip)
+    var savedPlaces: [Stop] = []
+
+    @Relationship(deleteRule: .cascade, inverse: \Expense.trip)
+    var expenses: [Expense] = []
+
     init(
         name: String,
         destination: String,

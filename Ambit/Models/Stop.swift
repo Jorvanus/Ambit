@@ -57,6 +57,10 @@ final class Stop {
     var bookingURLString: String?
 
     var day: Day?
+    var poolTrip: Trip?
+
+    @Relationship(deleteRule: .nullify, inverse: \Expense.stop)
+    var expenses: [Expense] = []
 
     init(
         name: String,

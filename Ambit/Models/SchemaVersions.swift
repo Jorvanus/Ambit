@@ -20,7 +20,7 @@ enum AmbitSchemaV1: VersionedSchema {
     }
 
     static var models: [any PersistentModel.Type] {
-        [Trip.self, Day.self, Stop.self]
+        [Trip.self, Day.self, Stop.self, Expense.self]
     }
 }
 

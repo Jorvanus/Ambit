@@ -1,14 +1,19 @@
 import CoreLocation
 import MapKit
 
+struct WalkingLeg: Sendable {
+    let time: TimeInterval
+    let distance: CLLocationDistance
+}
+
 enum DirectionsService {
-    /// Real walking travel time between two coordinates via MKDirections.
+    /// Real walking route between two coordinates via MKDirections.
     /// Returns nil if no route could be calculated (e.g. offline, or the
     /// points aren't walkable), so callers can fall back to an estimate.
-    static func walkingTravelTime(
+    static func walkingLeg(
         from: CLLocationCoordinate2D,
         to: CLLocationCoordinate2D
-    ) async -> TimeInterval? {
+    ) async -> WalkingLeg? {
         let request = MKDirections.Request()
         request.source = MKMapItem(placemark: MKPlacemark(coordinate: from))
         request.destination = MKMapItem(placemark: MKPlacemark(coordinate: to))
@@ -16,7 +21,8 @@ enum DirectionsService {
 
         do {
             let response = try await MKDirections(request: request).calculate()
-            return response.routes.first?.expectedTravelTime
+            guard let route = response.routes.first else { return nil }
+            return WalkingLeg(time: route.expectedTravelTime, distance: route.distance)
         } catch {
             return nil
         }

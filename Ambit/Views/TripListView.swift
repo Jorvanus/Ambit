@@ -7,6 +7,7 @@ struct TripListView: View {
     @Query(sort: \Trip.startDate) private var trips: [Trip]
 
     @State private var isPresentingNewTrip = false
+    @State private var isPresentingImport = false
     @State private var backupDocument: TripBackupDocument?
     @State private var isExporting = false
     @State private var isImporting = false
@@ -41,6 +42,13 @@ struct TripListView: View {
                         Label("Backup", systemImage: "archivebox")
                     }
                 }
+                ToolbarItem(placement: .secondaryAction) {
+                    Button {
+                        isPresentingImport = true
+                    } label: {
+                        Label("Import Itinerary", systemImage: "doc.text.magnifyingglass")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button(action: { isPresentingNewTrip = true }) {
                         Label("New Trip", systemImage: "plus")
@@ -50,6 +58,9 @@ struct TripListView: View {
             }
             .sheet(isPresented: $isPresentingNewTrip) {
                 TripFormView()
+            }
+            .sheet(isPresented: $isPresentingImport) {
+                ImportItineraryView()
             }
             .fileExporter(
                 isPresented: $isExporting,

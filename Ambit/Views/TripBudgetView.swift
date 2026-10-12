@@ -109,7 +109,9 @@ struct ExpenseFormView: View {
         self.trip = trip
         self.existingExpense = existingExpense
         _title = State(initialValue: existingExpense?.title ?? "")
-        _amountText = State(initialValue: existingExpense.map { String($0.amount) } ?? "")
+        _amountText = State(initialValue: existingExpense.map {
+            $0.amount.formatted(.number.precision(.fractionLength(0...2)).grouping(.never))
+        } ?? "")
         _date = State(initialValue: existingExpense?.date ?? Date())
         _stop = State(initialValue: existingExpense?.stop)
     }

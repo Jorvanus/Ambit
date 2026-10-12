@@ -18,11 +18,24 @@ private final class ImportModel {
     var startDate = Calendar.current.startOfDay(for: Date())
     private var geocodeTask: Task<Void, Never>?
 
+    /// Loads something shared from another app and starts reading it immediately.
+    func load(_ item: SharedItem) {
+        switch item.kind {
+        case .link:
+            source = .link
+            urlText = item.value
+        case .text:
+            source = .text
+            text = item.value
+        }
+        read()
+    }
+
     func read() {
         errorMessage = nil
         // Pasting a lone link into the text box should just work.
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if source == .text, !trimmed.contains(where: \.isWhitespace), trimmed.lowercased().hasPrefix("http") {
+        if source == .text, SharedInbox.item(forShared: trimmed)?.kind == .link {
             urlText = trimmed
             source = .link
         }
@@ -114,20 +127,22 @@ private final class ImportModel {
         flagOutliers()
     }
 
-    /// Geocoding can land a same-named place in a distant suburb. Flag anything far
-    /// from the middle of the other stops so the user checks it.
+    /// Geocoding can land a same-named place in a distant suburb. Flag any stop far from
+    /// the middle of the others (and from the destination, when known) so the user checks it.
     private func flagOutliers() {
         let located = draft.days.flatMap(\.stops).compactMap { stop -> (UUID, CLLocation)? in
             guard let lat = stop.latitude, let lon = stop.longitude else { return nil }
             return (stop.id, CLLocation(latitude: lat, longitude: lon))
         }
-        let center = located.count >= 3
-            ? CLLocation(
-                latitude: located.map { $0.1.coordinate.latitude }.sorted()[located.count / 2],
-                longitude: located.map { $0.1.coordinate.longitude }.sorted()[located.count / 2]
-            )
-            : nil
-        let far = Set(located.filter { center != nil && $0.1.distance(from: center!) > 40_000 }.map(\.0))
+        var far = Set<UUID>()
+        // With few stops a median is meaningless; two stops 20+ km apart still deserve a look.
+        if located.count >= 2 {
+            let lats = located.map { $0.1.coordinate.latitude }.sorted()
+            let lons = located.map { $0.1.coordinate.longitude }.sorted()
+            let center = CLLocation(latitude: lats[lats.count / 2], longitude: lons[lons.count / 2])
+            let limit: CLLocationDistance = located.count >= 3 ? 15_000 : 20_000
+            far = Set(located.filter { $0.1.distance(from: center) > limit }.map(\.0))
+        }
         for dayIndex in draft.days.indices {
             for stopIndex in draft.days[dayIndex].stops.indices {
                 let id = draft.days[dayIndex].stops[stopIndex].id
@@ -182,6 +197,12 @@ struct ImportItineraryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var model = ImportModel()
     @State private var mapPosition: MapCameraPosition = .automatic
+    @State private var didStartPrefill = false
+    private let prefill: SharedItem?
+
+    init(prefill: SharedItem? = nil) {
+        self.prefill = prefill
+    }
 
     var body: some View {
         NavigationStack {
@@ -194,6 +215,11 @@ struct ImportItineraryView: View {
             }
             .navigationTitle("Import Itinerary")
             .navigationBarTitleDisplayMode(.inline)
+            .task {
+                guard let prefill, !didStartPrefill else { return }
+                didStartPrefill = true
+                model.load(prefill)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {

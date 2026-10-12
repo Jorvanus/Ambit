@@ -8,6 +8,8 @@ struct TripListView: View {
 
     @State private var isPresentingNewTrip = false
     @State private var isPresentingImport = false
+    @State private var sharedItem: SharedItem?
+    @Environment(\.scenePhase) private var scenePhase
     @State private var backupDocument: TripBackupDocument?
     @State private var isExporting = false
     @State private var isImporting = false
@@ -58,6 +60,12 @@ struct TripListView: View {
             .sheet(isPresented: $isPresentingImport) {
                 ImportItineraryView()
             }
+            .sheet(item: $sharedItem, onDismiss: openSharedItem) { item in
+                ImportItineraryView(prefill: item)
+            }
+            .onChange(of: scenePhase, initial: true) {
+                if scenePhase == .active { openSharedItem() }
+            }
             .fileExporter(
                 isPresented: $isExporting,
                 document: backupDocument,
@@ -105,6 +113,16 @@ struct TripListView: View {
                 }
             }
         }
+    }
+
+    /// Opens the importer for something shared from another app. Waits if a sheet is already
+    /// showing, and puts any further shared items back so none are lost.
+    private func openSharedItem() {
+        guard sharedItem == nil, !isPresentingImport, !isPresentingNewTrip else { return }
+        var items = SharedInbox.takeAll()
+        guard !items.isEmpty else { return }
+        sharedItem = items.removeFirst()
+        items.forEach { SharedInbox.add($0) }
     }
 
     private func deleteTrips(at offsets: IndexSet) {

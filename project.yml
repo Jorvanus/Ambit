@@ -24,3 +24,14 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.jorvanus.Ambit
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
+  AmbitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Ambit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jorvanus.AmbitTests
+        GENERATE_INFOPLIST_FILE: YES

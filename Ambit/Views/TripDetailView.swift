@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 private enum TripTab: String, CaseIterable, Identifiable {
     case itinerary = "Itinerary"
@@ -117,9 +118,9 @@ private struct PlacesSection: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(places) { place in
-                    StopRow(stop: place, walkingTimeToNext: nil)
-                        .contentShape(Rectangle())
-                        .onTapGesture { onEdit(place) }
+                    StopRow(stop: place, walkingTimeToNext: nil, timingConflict: nil) {
+                        onEdit(place)
+                    }
                 }
                 .onDelete { offsets in
                     for place in offsets.map({ places[$0] }) {
@@ -142,7 +143,8 @@ private struct DaySection: View {
     let onEdit: (Stop) -> Void
 
     @Environment(\.modelContext) private var modelContext
-    @State private var legs: [UUID: WalkingLeg] = [:]
+    @State private var legs: [StopLegID: WalkingLeg] = [:]
+    @State private var isOptimizing = false
 
     private var stops: [Stop] {
         day.stops.sorted { $0.sortOrder < $1.sortOrder }
@@ -157,7 +159,18 @@ private struct DaySection: View {
     private func walkingTime(after index: Int) -> TimeInterval? {
         guard index < stops.count - 1 else { return nil }
         let stop = stops[index]
-        return legs[stop.id]?.time ?? RouteOptimizer.walkingTime(from: stop, to: stops[index + 1])
+        return legs[StopLegID(from: stop, to: stops[index + 1])]?.time
+            ?? RouteOptimizer.walkingTime(from: stop, to: stops[index + 1])
+    }
+
+    private func isWalkingEstimate(after index: Int) -> Bool {
+        guard index < stops.count - 1,
+              stops[index].hasCoordinate, stops[index + 1].hasCoordinate else { return false }
+        return legs[StopLegID(from: stops[index], to: stops[index + 1])] == nil
+    }
+
+    private var timingConflicts: [UUID: TimingConflict] {
+        DaySchedule.conflicts(for: stops, on: day.date, walkingLegs: legs)
     }
 
     private var summary: String {
@@ -165,22 +178,27 @@ private struct DaySection: View {
         var time: TimeInterval = 0
         var distance: Double = 0
         var hasLegs = false
+        var hasEstimatedLeg = false
         for index in 0..<max(0, stops.count - 1) {
             let from = stops[index]
             let to = stops[index + 1]
             guard from.hasCoordinate, to.hasCoordinate else { continue }
             hasLegs = true
-            if let leg = legs[from.id] {
+            if let leg = legs[StopLegID(from: from, to: to)] {
                 time += leg.time
                 distance += leg.distance
             } else {
+                hasEstimatedLeg = true
                 time += RouteOptimizer.walkingTime(from: from, to: to) ?? 0
                 distance += from.location.distance(from: to.location)
             }
         }
         if hasLegs {
-            parts.append("\(Int((time / 60).rounded())) min walking")
+            parts.append("\(hasEstimatedLeg ? "about " : "")\(Int((time / 60).rounded())) min walking")
             parts.append(String(format: "%.1f km", distance / 1000))
+        }
+        if !timingConflicts.isEmpty {
+            parts.append("\(timingConflicts.count) timing \(timingConflicts.count == 1 ? "conflict" : "conflicts")")
         }
         let toBook = stops.filter { $0.bookingStatus == .required }.count
         if toBook > 0 {
@@ -195,9 +213,14 @@ private struct DaySection: View {
                 Text("No stops yet").foregroundStyle(.secondary)
             } else {
                 ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
-                    StopRow(stop: stop, walkingTimeToNext: walkingTime(after: index))
-                        .contentShape(Rectangle())
-                        .onTapGesture { onEdit(stop) }
+                    StopRow(
+                        stop: stop,
+                        walkingTimeToNext: walkingTime(after: index),
+                        isWalkingEstimate: isWalkingEstimate(after: index),
+                        timingConflict: timingConflicts[stop.id]
+                    ) {
+                        onEdit(stop)
+                    }
                 }
                 .onDelete(perform: deleteStops)
                 .onMove(perform: moveStops)
@@ -207,13 +230,19 @@ private struct DaySection: View {
                     Label("Add Stop", systemImage: "plus")
                 }
                 Spacer()
-                if locatableStopCount > 1 {
+                if canOptimize {
                     Button {
-                        optimizeOrder()
+                        Task { await optimizeOrder() }
                     } label: {
-                        Label("Optimize", systemImage: "arrow.triangle.swap")
+                        if isOptimizing {
+                            ProgressView()
+                                .accessibilityLabel("Optimizing walking order")
+                        } else {
+                            Label("Optimize untimed", systemImage: "arrow.triangle.swap")
+                        }
                     }
                     .font(.caption)
+                    .disabled(isOptimizing)
                 }
             }
         } header: {
@@ -234,20 +263,32 @@ private struct DaySection: View {
 
     private func refreshLegs() async {
         let currentStops = stops
-        var results: [UUID: WalkingLeg] = [:]
+        legs = [:]
+        var results: [StopLegID: WalkingLeg] = [:]
         for index in 0..<max(0, currentStops.count - 1) {
             let from = currentStops[index]
             let to = currentStops[index + 1]
             guard from.hasCoordinate, to.hasCoordinate else { continue }
             if let leg = await DirectionsService.walkingLeg(from: from.coordinate, to: to.coordinate) {
-                results[from.id] = leg
+                results[StopLegID(from: from, to: to)] = leg
             }
         }
-        legs = results
+        if !Task.isCancelled {
+            legs = results
+        }
     }
 
-    private var locatableStopCount: Int {
-        stops.filter { $0.hasCoordinate }.count
+    private var canOptimize: Bool {
+        var untimedCount = 0
+        for stop in stops {
+            if stop.plannedTime != nil {
+                if untimedCount > 1 { return true }
+                untimedCount = 0
+            } else if stop.hasCoordinate {
+                untimedCount += 1
+            }
+        }
+        return untimedCount > 1
     }
 
     private func deleteStops(at offsets: IndexSet) {
@@ -272,8 +313,17 @@ private struct DaySection: View {
         }
     }
 
-    private func optimizeOrder() {
-        let optimized = RouteOptimizer.optimizedOrder(for: stops)
+    private func optimizeOrder() async {
+        let original = stops
+        isOptimizing = true
+        defer { isOptimizing = false }
+        let optimized = await RouteOptimizer.optimizedOrder(for: original)
+        let current = stops
+        guard current.count == original.count,
+              zip(current, original).allSatisfy({ now, before in
+                  now.id == before.id && now.plannedTime == before.plannedTime
+                      && now.latitude == before.latitude && now.longitude == before.longitude
+              }) else { return }
         for (index, stop) in optimized.enumerated() {
             stop.sortOrder = index
         }
@@ -283,29 +333,74 @@ private struct DaySection: View {
 private struct StopRow: View {
     let stop: Stop
     let walkingTimeToNext: TimeInterval?
+    var isWalkingEstimate = false
+    let timingConflict: TimingConflict?
+    let onEdit: () -> Void
+
+    private var bookingLink: URL? {
+        guard let url = stop.bookingURL,
+              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        return url
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Image(systemName: icon(for: stop.category))
-                    .frame(width: 28, height: 28)
-                    .glassEffect(.regular.interactive(), in: .circle)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(stop.name).font(.body)
-                    if let time = stop.plannedTime {
-                        Text(time.formatted(date: .omitted, time: .shortened))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button(action: onEdit) {
+                    HStack {
+                        Image(systemName: icon(for: stop.category))
+                            .frame(width: 28, height: 28)
+                            .glassEffect(.regular.interactive(), in: .circle)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(stop.name).font(.body)
+                            if let time = stop.plannedTime {
+                                Text(time.formatted(date: .omitted, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer(minLength: 0)
                     }
                 }
-                Spacer()
+                .buttonStyle(.plain)
+                .accessibilityLabel("Edit \(stop.name)")
                 if stop.bookingStatus != .none {
-                    Image(systemName: stop.bookingStatus.icon)
-                        .foregroundStyle(bookingColor(for: stop.bookingStatus))
+                    Menu {
+                        Text(stop.bookingStatus.label)
+                        if let confirmation = stop.confirmationNumber, !confirmation.isEmpty {
+                            Button("Copy confirmation number", systemImage: "doc.on.doc") {
+                                UIPasteboard.general.string = confirmation
+                            }
+                            Text("Confirmation: \(confirmation)")
+                        }
+                        if let bookingLink {
+                            Link(destination: bookingLink) {
+                                Label("Open booking", systemImage: "arrow.up.forward.app")
+                            }
+                        }
+                        Button("Edit booking", systemImage: "pencil", action: onEdit)
+                    } label: {
+                        Label("Booking", systemImage: stop.bookingStatus.icon)
+                            .labelStyle(.iconOnly)
+                            .foregroundStyle(bookingColor(for: stop.bookingStatus))
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .accessibilityLabel("Booking for \(stop.name): \(stop.bookingStatus.label)")
                 }
             }
+            if let timingConflict {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("Timing conflict: may be \(max(1, Int(ceil(timingConflict.lateBy / 60)))) min late")
+                        .foregroundStyle(.primary)
+                }
+                .font(.footnote.weight(.medium))
+                .padding(.leading, 36)
+                .accessibilityElement(children: .combine)
+            }
             if let walkingTimeToNext {
-                Label("\(Int((walkingTimeToNext / 60).rounded())) min walk to next stop", systemImage: "figure.walk")
+                Label("\(isWalkingEstimate ? "About " : "")\(Int((walkingTimeToNext / 60).rounded())) min walk to next stop", systemImage: "figure.walk")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .padding(.leading, 36)

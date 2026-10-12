@@ -1,11 +1,19 @@
 import MapKit
 import SwiftUI
 
+private struct MapRoutePair: Identifiable {
+    let from: Stop
+    let to: Stop
+
+    var id: StopLegID { StopLegID(from: from, to: to) }
+}
+
 struct TripMapView: View {
     let trip: Trip
 
     @State private var selectedDayID: UUID?
     @State private var position: MapCameraPosition = .automatic
+    @State private var walkingRoutes: [StopLegID: WalkingLeg] = [:]
 
     private static let palette: [Color] = [.blue, .orange, .green, .purple, .pink, .teal, .red, .indigo]
 
@@ -30,6 +38,26 @@ struct TripMapView: View {
         day.stops.sorted { $0.sortOrder < $1.sortOrder }.filter(\.hasCoordinate)
     }
 
+    private func routePairs(for day: Day) -> [MapRoutePair] {
+        let stops = day.stops.sorted { $0.sortOrder < $1.sortOrder }
+        return zip(stops, stops.dropFirst()).compactMap { from, to in
+            guard from.hasCoordinate, to.hasCoordinate else { return nil }
+            return MapRoutePair(from: from, to: to)
+        }
+    }
+
+    private var visibleRoutePairs: [MapRoutePair] {
+        visibleDays.flatMap(routePairs)
+    }
+
+    private var routeSignature: [String] {
+        [selectedDayID?.uuidString ?? "all"] + visibleDays.flatMap { day in
+            [day.id.uuidString] + day.stops.sorted { $0.sortOrder < $1.sortOrder }.map {
+                "\($0.id)|\($0.latitude)|\($0.longitude)"
+            }
+        }
+    }
+
     private var hasAnyLocation: Bool {
         days.contains { !located($0).isEmpty } || !trip.savedPlaces.filter(\.hasCoordinate).isEmpty
     }
@@ -37,18 +65,26 @@ struct TripMapView: View {
     var body: some View {
         Map(position: $position) {
             ForEach(visibleDays) { day in
-                if located(day).count > 1 {
-                    MapPolyline(coordinates: located(day).map(\.coordinate))
-                        .stroke(color(for: day), lineWidth: 4)
+                ForEach(routePairs(for: day).filter { walkingRoutes[$0.id]?.path.isEmpty == false }) { pair in
+                    if let route = walkingRoutes[pair.id] {
+                        MapPolyline(coordinates: route.path.map(\.coordinate))
+                            .stroke(color(for: day), lineWidth: 4)
+                    }
                 }
-                ForEach(Array(located(day).enumerated()), id: \.element.id) { index, stop in
-                    Annotation(stop.name, coordinate: stop.coordinate) {
-                        Text("\(index + 1)")
-                            .font(.caption.bold())
-                            .foregroundStyle(.white)
-                            .frame(width: 26, height: 26)
-                            .background(color(for: day), in: .circle)
-                            .overlay(Circle().stroke(.white, lineWidth: 2))
+                ForEach(routePairs(for: day).filter { walkingRoutes[$0.id]?.path.isEmpty != false }) { pair in
+                    MapPolyline(coordinates: [pair.from.coordinate, pair.to.coordinate])
+                        .stroke(color(for: day).opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [5, 5]))
+                }
+                ForEach(Array(day.stops.sorted { $0.sortOrder < $1.sortOrder }.enumerated()), id: \.element.id) { index, stop in
+                    if stop.hasCoordinate {
+                        Annotation(stop.name, coordinate: stop.coordinate) {
+                            Text("\(index + 1)")
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                                .frame(width: 26, height: 26)
+                                .background(color(for: day), in: .circle)
+                                .overlay(Circle().stroke(.white, lineWidth: 2))
+                        }
                     }
                 }
             }
@@ -85,8 +121,32 @@ struct TripMapView: View {
                 }
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if visibleRoutePairs.contains(where: { walkingRoutes[$0.id]?.path.isEmpty != false }) {
+                Text("Dashed lines are approximate while walking routes load or are unavailable.")
+                    .font(.caption)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                    .background(.regularMaterial)
+            }
+        }
+        .task(id: routeSignature) {
+            await refreshWalkingRoutes()
+        }
         .onChange(of: selectedDayID) {
             position = .automatic
+        }
+    }
+
+    private func refreshWalkingRoutes() async {
+        walkingRoutes = [:]
+        for pair in visibleRoutePairs {
+            let route = await DirectionsService.walkingLeg(from: pair.from.coordinate, to: pair.to.coordinate)
+            guard !Task.isCancelled else { return }
+            if let route {
+                walkingRoutes[pair.id] = route
+            }
         }
     }
 

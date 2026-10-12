@@ -13,6 +13,8 @@ struct TripFormView: View {
     @State private var endDate: Date
     @State private var pace: Pace
     @State private var budgetText: String
+    @State private var isConfirmingRemovedDays = false
+    @State private var saveError: String?
 
     init(existingTrip: Trip? = nil) {
         self.existingTrip = existingTrip
@@ -51,11 +53,42 @@ struct TripFormView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
+                    Button("Save") { requestSave() }
                         .buttonStyle(.glassProminent)
                         .disabled(name.isEmpty || destination.isEmpty)
                 }
             }
+            .confirmationDialog(
+                "Move stops from removed days?",
+                isPresented: $isConfirmingRemovedDays,
+                titleVisibility: .visible
+            ) {
+                Button("Move Stops and Save") { save() }
+            } message: {
+                Text("\(excludedStopCount) stops on days outside the new dates will move to Places to Visit. Their booking details and expenses will stay attached.")
+            }
+            .alert("Could Not Save Trip", isPresented: Binding(
+                get: { saveError != nil },
+                set: { if !$0 { saveError = nil } }
+            )) {
+                Button("OK", role: .cancel) { saveError = nil }
+            } message: {
+                Text(saveError ?? "")
+            }
+        }
+    }
+
+    private var excludedStopCount: Int {
+        guard let existingTrip else { return 0 }
+        return TripDateChangeService.excludedDays(in: existingTrip, start: startDate, end: endDate)
+            .reduce(0) { $0 + $1.stops.count }
+    }
+
+    private func requestSave() {
+        if excludedStopCount > 0 {
+            isConfirmingRemovedDays = true
+        } else {
+            save()
         }
     }
 
@@ -68,48 +101,28 @@ struct TripFormView: View {
             pace: pace,
             budget: Double(budgetText)
         )
-        if existingTrip != nil {
-            trip.name = name
-            trip.destination = destination
-            trip.startDate = startDate
-            trip.endDate = endDate
-            trip.pace = pace
-            trip.budget = Double(budgetText)
-        } else {
-            modelContext.insert(trip)
-        }
-        syncDays(for: trip)
-        dismiss()
-    }
-
-    /// Adds/removes Day objects so they match the trip's current date range,
-    /// preserving (and their stops) any day that's still within range.
-    private func syncDays(for trip: Trip) {
-        let calendar = Calendar.current
-        var desiredDates: [Date] = []
-        var currentDate = calendar.startOfDay(for: trip.startDate)
-        let lastDate = calendar.startOfDay(for: trip.endDate)
-        while currentDate <= lastDate {
-            desiredDates.append(currentDate)
-            guard let next = calendar.date(byAdding: .day, value: 1, to: currentDate) else { break }
-            currentDate = next
-        }
-        let desiredSet = Set(desiredDates)
-
-        for day in trip.days where !desiredSet.contains(calendar.startOfDay(for: day.date)) {
-            modelContext.delete(day)
-        }
-
-        let existingDates = Set(trip.days.map { calendar.startOfDay(for: $0.date) })
-        for date in desiredDates where !existingDates.contains(date) {
-            let day = Day(date: date)
-            day.trip = trip
-            modelContext.insert(day)
+        do {
+            if existingTrip == nil { modelContext.insert(trip) }
+            try TripDateChangeService.apply(
+                to: trip,
+                start: startDate,
+                end: endDate,
+                name: name,
+                destination: destination,
+                pace: pace,
+                budget: Double(budgetText),
+                in: modelContext
+            )
+            try modelContext.save()
+            dismiss()
+        } catch {
+            modelContext.rollback()
+            saveError = error.localizedDescription
         }
     }
 }
 
 #Preview {
     TripFormView()
-        .modelContainer(for: [Trip.self, Day.self, Stop.self], inMemory: true)
+        .modelContainer(for: [Trip.self, Day.self, Stop.self, Expense.self], inMemory: true)
 }

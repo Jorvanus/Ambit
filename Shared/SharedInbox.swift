@@ -13,7 +13,7 @@ struct SharedItem: Codable, Identifiable, Sendable {
 }
 
 enum SharedInbox {
-    static let groupID = "group.com.jorvanus.Ambit"
+    static let groupID = "group.com.aarongbaxter.AmbitTrips"
     private static let key = "pendingShares"
     private static let maxItems = 10
     static let maxTextLength = 100_000

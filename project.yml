@@ -1,6 +1,6 @@
 name: Ambit
 options:
-  bundleIdPrefix: com.jorvanus
+  bundleIdPrefix: com.aarongbaxter
   xcodeVersion: "2700"
   deploymentTarget:
     iOS: "27.0"
@@ -8,7 +8,8 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     IPHONEOS_DEPLOYMENT_TARGET: "27.0"
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: 337KNRL5L8
+    CODE_SIGN_STYLE: Automatic
 targets:
   Ambit:
     type: application
@@ -22,14 +23,14 @@ targets:
       path: Ambit/Ambit.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.jorvanus.Ambit
+          - group.com.aarongbaxter.AmbitTrips
     info:
       path: Ambit/Info.plist
       properties:
         UILaunchScreen: {}
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.jorvanus.Ambit
+        PRODUCT_BUNDLE_IDENTIFIER: com.aarongbaxter.AmbitTrips
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
   AmbitShare:
@@ -42,7 +43,7 @@ targets:
       path: AmbitShare/AmbitShare.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.jorvanus.Ambit
+          - group.com.aarongbaxter.AmbitTrips
     info:
       path: AmbitShare/Info.plist
       properties:
@@ -56,7 +57,7 @@ targets:
               NSExtensionActivationSupportsText: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.jorvanus.Ambit.Share
+        PRODUCT_BUNDLE_IDENTIFIER: com.aarongbaxter.AmbitTrips.Share
         SKIP_INSTALL: YES
   AmbitTests:
     type: bundle.unit-test
@@ -67,5 +68,5 @@ targets:
       - target: Ambit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.jorvanus.AmbitTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.aarongbaxter.AmbitTripsTests
         GENERATE_INFOPLIST_FILE: YES

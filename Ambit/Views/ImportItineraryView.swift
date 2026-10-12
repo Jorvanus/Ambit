@@ -7,20 +7,41 @@ import SwiftUI
 @MainActor
 private final class ImportModel {
     enum Stage { case input, reading, review }
+    enum Source: String, CaseIterable { case text = "Text", link = "Link" }
 
     var stage = Stage.input
+    var source = Source.text
     var text = ""
+    var urlText = ""
+    var errorMessage: String?
     var draft = ItineraryDraft()
     var startDate = Calendar.current.startOfDay(for: Date())
     private var geocodeTask: Task<Void, Never>?
 
     func read() {
+        errorMessage = nil
+        // Pasting a lone link into the text box should just work.
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if source == .text, !trimmed.contains(where: \.isWhitespace), trimmed.lowercased().hasPrefix("http") {
+            urlText = trimmed
+            source = .link
+        }
+
         stage = .reading
-        let source = text
+        let pastedText = text
+        let link = urlText
+        let fromLink = source == .link
         Task {
-            draft = await ItineraryExtractor.extract(from: source)
-            stage = .review
-            locateAll()
+            do {
+                draft = fromLink
+                    ? try await ItineraryPageImporter.load(link)
+                    : await ItineraryExtractor.extract(from: pastedText)
+                stage = .review
+                locateAll()
+            } catch {
+                errorMessage = error.localizedDescription
+                stage = .input
+            }
         }
     }
 
@@ -160,6 +181,7 @@ struct ImportItineraryView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @State private var model = ImportModel()
+    @State private var mapPosition: MapCameraPosition = .automatic
 
     var body: some View {
         NavigationStack {
@@ -202,37 +224,74 @@ struct ImportItineraryView: View {
     private var inputStage: some View {
         Form {
             Section {
-                TextEditor(text: $model.text)
-                    .frame(minHeight: 220)
-                    .overlay(alignment: .topLeading) {
-                        if model.text.isEmpty {
-                            Text("Paste an itinerary, e.g.\nDay 1\n9:00 Story Bridge\n12:30 Lunch at Howard Smith Wharves")
-                                .foregroundStyle(.tertiary)
-                                .padding(.top, 8)
-                                .padding(.leading, 5)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                PasteButton(payloadType: String.self) { strings in
-                    if let pasted = strings.first { model.text = pasted }
+                Picker("Source", selection: $model.source) {
+                    ForEach(ImportModel.Source.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
-            } header: {
-                Text("Itinerary text")
-            } footer: {
-                Text("Text is read on this device. You'll review every stop before anything is saved.")
+                .pickerStyle(.segmented)
+            }
+
+            if model.source == .text {
+                Section {
+                    TextEditor(text: $model.text)
+                        .frame(minHeight: 220)
+                        .overlay(alignment: .topLeading) {
+                            if model.text.isEmpty {
+                                Text("Paste an itinerary, e.g.\nDay 1\n9:00 Story Bridge\n12:30 Lunch at Howard Smith Wharves")
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.top, 8)
+                                    .padding(.leading, 5)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                    PasteButton(payloadType: String.self) { strings in
+                        if let pasted = strings.first { model.text = pasted }
+                    }
+                } header: {
+                    Text("Itinerary text")
+                } footer: {
+                    Text("Text is read on this device. You'll review every stop before anything is saved.")
+                }
+            } else {
+                Section {
+                    TextField("https://example.com/3-days-in-lisbon", text: $model.urlText)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    PasteButton(payloadType: String.self) { strings in
+                        if let pasted = strings.first { model.urlText = pasted.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    }
+                } header: {
+                    Text("Web page")
+                } footer: {
+                    Text("Ambit downloads the page without sending any cookies or account details, then reads it on this device. Pages that need a login or load their content with JavaScript can't be read; paste the text instead.")
+                }
+            }
+
+            if let error = model.errorMessage {
+                Section {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
             }
 
             Section {
-                Button("Read Itinerary") { model.read() }
-                    .disabled(model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button(model.source == .link ? "Fetch & Read Page" : "Read Itinerary") { model.read() }
+                    .disabled(readDisabled)
             }
         }
+    }
+
+    private var readDisabled: Bool {
+        let value = model.source == .link ? model.urlText : model.text
+        return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var readingStage: some View {
         VStack(spacing: 16) {
             ProgressView()
-            Text("Reading your itinerary…").foregroundStyle(.secondary)
+            Text(model.source == .link ? "Fetching and reading the page…" : "Reading your itinerary…")
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -245,6 +304,14 @@ struct ImportItineraryView: View {
                 DatePicker("Starts", selection: $model.startDate, displayedComponents: .date)
                 Button("Find places again near destination") { model.locateAll(force: true) }
                     .disabled(model.draft.stopCount == 0)
+            }
+
+            if let host = model.draft.sourceHost {
+                Section {
+                    Label("From \(host). Check each stop before creating the trip.", systemImage: "link")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if let note = model.draft.note {
@@ -282,7 +349,7 @@ struct ImportItineraryView: View {
 
     private var reviewMap: some View {
         let located = model.draft.days.flatMap(\.stops).filter { $0.latitude != nil }
-        return Map {
+        return Map(position: $mapPosition) {
             ForEach(located) { stop in
                 Marker(
                     stop.name,
@@ -293,6 +360,23 @@ struct ImportItineraryView: View {
         }
         .frame(height: 200)
         .listRowInsets(EdgeInsets())
+        // The map is built before geocoding finishes, so refit as pins arrive.
+        .onChange(of: located.count) { fitMap(to: located) }
+        .onAppear { fitMap(to: located) }
+    }
+
+    private func fitMap(to stops: [DraftStop]) {
+        let points = stops.compactMap { stop -> MKMapPoint? in
+            guard let lat = stop.latitude, let lon = stop.longitude else { return nil }
+            return MKMapPoint(CLLocationCoordinate2D(latitude: lat, longitude: lon))
+        }
+        guard let first = points.first else { return }
+        let rect = points.dropFirst().reduce(MKMapRect(origin: first, size: MKMapSize(width: 0, height: 0))) {
+            $0.union(MKMapRect(origin: $1, size: MKMapSize(width: 0, height: 0)))
+        }
+        // Pad so edge pins aren't clipped, with a floor so a single stop isn't zoomed in absurdly far.
+        let padded = rect.insetBy(dx: -max(rect.width * 0.25, 4000), dy: -max(rect.height * 0.25, 4000))
+        mapPosition = .rect(padded)
     }
 
     private func row(for id: UUID) -> some View {

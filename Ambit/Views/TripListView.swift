@@ -42,16 +42,12 @@ struct TripListView: View {
                         Label("Backup", systemImage: "archivebox")
                     }
                 }
-                ToolbarItem(placement: .secondaryAction) {
-                    Button {
-                        isPresentingImport = true
-                    } label: {
-                        Label("Import Itinerary", systemImage: "doc.text.magnifyingglass")
-                    }
-                }
                 ToolbarItem(placement: .primaryAction) {
-                    Button(action: { isPresentingNewTrip = true }) {
-                        Label("New Trip", systemImage: "plus")
+                    Menu {
+                        Button("New Trip", systemImage: "square.and.pencil") { isPresentingNewTrip = true }
+                        Button("Import Itinerary", systemImage: "doc.text.magnifyingglass") { isPresentingImport = true }
+                    } label: {
+                        Label("Add Trip", systemImage: "plus")
                     }
                     .buttonStyle(.glassProminent)
                 }

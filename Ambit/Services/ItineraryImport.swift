@@ -35,6 +35,7 @@ struct ItineraryDraft: Sendable {
     var days: [DraftDay] = []
     var usedOnDeviceModel = false
     var note: String?
+    var sourceHost: String?
 
     var stopCount: Int { days.reduce(0) { $0 + $1.stops.count } }
 }
@@ -171,6 +172,7 @@ enum ItineraryExtractor {
 enum ItineraryTextParser {
     struct Section {
         var title: String
+        var dayNumber: Int
         var lines: [String]
     }
 
@@ -182,18 +184,34 @@ enum ItineraryTextParser {
     /// Splits on "Day 1", "Day 2: Old Town" style headings.
     static func split(_ text: String) -> Split {
         let header = #/^\s*(?:\#+\s*)?day\s*(\d+)\b[\s:–—-]*(.*)$/#.ignoresCase()
+        // Web pages continue past the last day with tips, hotels and FAQs; ignore those.
+        let tail = #/^\s*(?:extra time|more things to do|where to stay|how to get around|getting around|best time to visit|frequently asked|faqs?\b|final thoughts|conclusion|related (?:posts|articles)|you (?:might|may) also|where to eat|what to pack|packing list|travel tips|practical (?:tips|information))/#.ignoresCase()
         var result = Split(preamble: [], sections: [])
+        var skipping = false
         for line in text.split(whereSeparator: \.isNewline).map(String.init) {
             if let match = line.wholeMatch(of: header) {
+                skipping = false
                 let suffix = String(match.output.2).trimmingCharacters(in: .whitespaces)
                 let title = suffix.isEmpty ? "Day \(match.output.1)" : "Day \(match.output.1): \(suffix)"
-                result.sections.append(Section(title: title, lines: []))
+                result.sections.append(Section(title: title, dayNumber: Int(match.output.1) ?? 0, lines: []))
+            } else if skipping {
+                continue
+            } else if !result.sections.isEmpty, line.prefixMatch(of: tail) != nil {
+                skipping = true
             } else if result.sections.isEmpty {
                 result.preamble.append(line)
             } else {
                 result.sections[result.sections.count - 1].lines.append(line)
             }
         }
+
+        // Web pages list "Day 1, Day 2…" in a table of contents before the real days.
+        // Keep only the fullest section for each day number, in page order.
+        let fullest = Dictionary(grouping: result.sections.indices, by: { result.sections[$0].dayNumber })
+            .mapValues { indices in indices.max { result.sections[$0].lines.count < result.sections[$1].lines.count }! }
+        result.sections = result.sections.indices
+            .filter { fullest[result.sections[$0].dayNumber] == $0 }
+            .map { result.sections[$0] }
         return result
     }
 

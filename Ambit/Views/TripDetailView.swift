@@ -9,11 +9,27 @@ private enum TripTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private enum TripSheet: Identifiable {
+    case newStop(Day?)
+    case editStop(Stop)
+
+    var id: String {
+        switch self {
+        case .newStop(let day): return "new-\(day?.id.uuidString ?? "pool")"
+        case .editStop(let stop): return "edit-\(stop.id.uuidString)"
+        }
+    }
+}
+
 struct TripDetailView: View {
     @Bindable var trip: Trip
 
     @State private var tab: TripTab = .itinerary
     @State private var isPresentingEditTrip = false
+    // Sheets live here, not on the list sections: a sheet attached inside a
+    // List row is dismissed whenever that row re-renders (e.g. when walking
+    // times arrive), which would wipe a half-filled form.
+    @State private var sheet: TripSheet?
 
     private var sortedDays: [Day] {
         trip.days.sorted { $0.date < $1.date }
@@ -24,9 +40,17 @@ struct TripDetailView: View {
             switch tab {
             case .itinerary:
                 List {
-                    PlacesSection(trip: trip)
+                    PlacesSection(
+                        trip: trip,
+                        onAdd: { sheet = .newStop(nil) },
+                        onEdit: { sheet = .editStop($0) }
+                    )
                     ForEach(sortedDays) { day in
-                        DaySection(trip: trip, day: day)
+                        DaySection(
+                            day: day,
+                            onAdd: { sheet = .newStop(day) },
+                            onEdit: { sheet = .editStop($0) }
+                        )
                     }
                 }
             case .map:
@@ -64,15 +88,23 @@ struct TripDetailView: View {
         .sheet(isPresented: $isPresentingEditTrip) {
             TripFormView(existingTrip: trip)
         }
+        .sheet(item: $sheet) { sheet in
+            switch sheet {
+            case .newStop(let day):
+                StopFormView(trip: trip, day: day)
+            case .editStop(let stop):
+                StopFormView(trip: trip, day: stop.day, existingStop: stop)
+            }
+        }
     }
 }
 
 private struct PlacesSection: View {
     @Bindable var trip: Trip
+    let onAdd: () -> Void
+    let onEdit: (Stop) -> Void
 
     @Environment(\.modelContext) private var modelContext
-    @State private var isPresentingAdd = false
-    @State private var editingStop: Stop?
 
     private var places: [Stop] {
         trip.savedPlaces.sorted { $0.sortOrder < $1.sortOrder }
@@ -87,7 +119,7 @@ private struct PlacesSection: View {
                 ForEach(places) { place in
                     StopRow(stop: place, walkingTimeToNext: nil)
                         .contentShape(Rectangle())
-                        .onTapGesture { editingStop = place }
+                        .onTapGesture { onEdit(place) }
                 }
                 .onDelete { offsets in
                     for place in offsets.map({ places[$0] }) {
@@ -95,30 +127,21 @@ private struct PlacesSection: View {
                     }
                 }
             }
-            Button {
-                isPresentingAdd = true
-            } label: {
+            Button(action: onAdd) {
                 Label("Add Place", systemImage: "plus")
             }
         } header: {
             Label("Places to visit", systemImage: "bookmark")
         }
-        .sheet(isPresented: $isPresentingAdd) {
-            StopFormView(trip: trip)
-        }
-        .sheet(item: $editingStop) { place in
-            StopFormView(trip: trip, existingStop: place)
-        }
     }
 }
 
 private struct DaySection: View {
-    let trip: Trip
     @Bindable var day: Day
+    let onAdd: () -> Void
+    let onEdit: (Stop) -> Void
 
     @Environment(\.modelContext) private var modelContext
-    @State private var isPresentingAddStop = false
-    @State private var editingStop: Stop?
     @State private var legs: [UUID: WalkingLeg] = [:]
 
     private var stops: [Stop] {
@@ -174,15 +197,13 @@ private struct DaySection: View {
                 ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
                     StopRow(stop: stop, walkingTimeToNext: walkingTime(after: index))
                         .contentShape(Rectangle())
-                        .onTapGesture { editingStop = stop }
+                        .onTapGesture { onEdit(stop) }
                 }
                 .onDelete(perform: deleteStops)
                 .onMove(perform: moveStops)
             }
             HStack {
-                Button {
-                    isPresentingAddStop = true
-                } label: {
+                Button(action: onAdd) {
                     Label("Add Stop", systemImage: "plus")
                 }
                 Spacer()
@@ -205,12 +226,6 @@ private struct DaySection: View {
                         .foregroundStyle(.secondary)
                 }
             }
-        }
-        .sheet(isPresented: $isPresentingAddStop) {
-            StopFormView(trip: trip, day: day)
-        }
-        .sheet(item: $editingStop) { stop in
-            StopFormView(trip: trip, day: day, existingStop: stop)
         }
         .task(id: routeSignature) {
             await refreshLegs()

@@ -32,6 +32,7 @@ struct DraftDay: Identifiable, Sendable {
 struct ItineraryDraft: Sendable {
     var name = ""
     var destination = ""
+    var destinationPlace: ResolvedPlace?
     var days: [DraftDay] = []
     var usedOnDeviceModel = false
     var note: String?

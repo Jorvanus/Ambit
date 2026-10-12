@@ -19,6 +19,9 @@ targets:
       - path: Shared
     dependencies:
       - target: AmbitShare
+    scheme:
+      testTargets:
+        - AmbitTests
     entitlements:
       path: Ambit/Ambit.entitlements
       properties:

@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import SwiftData
 
@@ -20,6 +21,10 @@ final class Trip {
     var endDate: Date
     var pace: Pace
     var budget: Double?
+    /// Centre of the chosen destination. Optional so trips made before destinations were
+    /// resolved (free text) keep working.
+    var destinationLatitude: Double?
+    var destinationLongitude: Double?
 
     @Relationship(deleteRule: .cascade, inverse: \Day.trip)
     var days: [Day] = []
@@ -45,5 +50,10 @@ final class Trip {
         self.endDate = endDate
         self.pace = pace
         self.budget = budget
+    }
+
+    var destinationCoordinate: CLLocationCoordinate2D? {
+        guard let destinationLatitude, let destinationLongitude else { return nil }
+        return CLLocationCoordinate2D(latitude: destinationLatitude, longitude: destinationLongitude)
     }
 }

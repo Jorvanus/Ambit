@@ -61,6 +61,8 @@ enum TripBackupService {
                         pace: record.pace,
                         budget: record.budget
                     )
+                    trip.destinationLatitude = record.destinationLatitude
+                    trip.destinationLongitude = record.destinationLongitude
                     context.insert(trip)
                     var stopsByOriginalID: [UUID: Stop] = [:]
 
@@ -183,6 +185,8 @@ enum TripBackupService {
         let endDate: Date
         let pace: Pace
         let budget: Double?
+        let destinationLatitude: Double?
+        let destinationLongitude: Double?
         let days: [DayRecord]
         let savedPlaces: [StopRecord]
         let expenses: [ExpenseRecord]
@@ -195,6 +199,8 @@ enum TripBackupService {
             endDate = trip.endDate
             pace = trip.pace
             budget = trip.budget
+            destinationLatitude = trip.destinationLatitude
+            destinationLongitude = trip.destinationLongitude
             days = trip.days.sorted { $0.date < $1.date }.map(DayRecord.init)
             savedPlaces = trip.savedPlaces.sorted { $0.sortOrder < $1.sortOrder }.map(StopRecord.init)
             expenses = trip.expenses.sorted { $0.id.uuidString < $1.id.uuidString }.map(ExpenseRecord.init)

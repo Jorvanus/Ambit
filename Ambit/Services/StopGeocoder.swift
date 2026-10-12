@@ -6,8 +6,16 @@ enum StopGeocoder {
     /// destination. Address-style geocoding ("name, city") can pick a same-named
     /// place in a distant suburb, so this searches for points of interest within
     /// a region around the destination and takes the closest result.
-    static func geocode(name: String, near destination: String) async -> CLLocationCoordinate2D? {
-        if let center = await destinationCenter(destination),
+    static func geocode(
+        name: String,
+        near destination: String,
+        center knownCenter: CLLocationCoordinate2D? = nil
+    ) async -> CLLocationCoordinate2D? {
+        // A destination picked from the suggestions already has a coordinate; only
+        // free-text (older) destinations need to be geocoded to find the area.
+        let center: CLLocationCoordinate2D?
+        if let knownCenter { center = knownCenter } else { center = await destinationCenter(destination) }
+        if let center,
            let hit = await search(name, around: center) {
             return hit
         }

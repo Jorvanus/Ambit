@@ -199,13 +199,14 @@ private struct TripDayPicker: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Button {
                         selectedDayID = nil
                     } label: {
                         dateLabel(top: "All", bottom: "days", isSelected: selectedDayID == nil)
                     }
                     .buttonStyle(.glass)
+                    .controlSize(.small)
                     .tint(selectedDayID == nil ? .accentColor : nil)
                     .accessibilityLabel("All days")
                     .accessibilityAddTraits(selectedDayID == nil ? .isSelected : [])
@@ -224,6 +225,7 @@ private struct TripDayPicker: View {
                             )
                         }
                         .buttonStyle(.glass)
+                        .controlSize(.small)
                         .tint(isSelected ? .accentColor : nil)
                         .accessibilityLabel(day.date.formatted(date: .complete, time: .omitted))
                         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -231,7 +233,7 @@ private struct TripDayPicker: View {
                     }
                 }
                 .padding(.horizontal)
-                .padding(.vertical, 6)
+                .padding(.vertical, 2)
             }
             .scrollIndicators(.hidden, axes: .horizontal)
             .onAppear { proxy.scrollTo(selectedPickerID, anchor: .center) }
@@ -244,13 +246,13 @@ private struct TripDayPicker: View {
     }
 
     private func dateLabel(top: String, bottom: String, isSelected: Bool) -> some View {
-        VStack(spacing: 2) {
-            Text(top).font(.caption.weight(isSelected ? .bold : .medium))
-            Text(bottom).font(.subheadline.weight(isSelected ? .semibold : .regular))
+        VStack(spacing: 0) {
+            Text(top).font(.caption2.weight(isSelected ? .bold : .medium))
+            Text(bottom).font(.caption.weight(isSelected ? .semibold : .regular))
         }
-        .frame(minWidth: 62)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
+        .frame(minWidth: 40)
+        .padding(.horizontal, 2)
+        .padding(.vertical, 1)
         .contentShape(Rectangle())
     }
 }

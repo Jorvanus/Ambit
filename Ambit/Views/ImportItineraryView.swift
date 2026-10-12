@@ -49,6 +49,8 @@ private final class ImportModel {
                 draft = fromLink
                     ? try await ItineraryPageImporter.load(link)
                     : await ItineraryExtractor.extract(from: pastedText)
+                // Resolve the destination first so stop searches centre on it.
+                draft.destinationPlace = await DestinationResolver.resolve(text: draft.destination)
                 stage = .review
                 locateAll()
             } catch {
@@ -74,13 +76,14 @@ private final class ImportModel {
             }
         }
         let targets = draft.days.flatMap(\.stops).filter { $0.locateState != .found }.map(\.id)
-        let destination = draft.destination
+        let destination = draft.destinationPlace?.name ?? draft.destination
+        let center = draft.destinationPlace?.coordinate
         geocodeTask = Task {
             for id in targets {
                 guard !Task.isCancelled else { return }
                 guard let name = stop(id)?.name else { continue }
                 update(id) { $0.locateState = .locating }
-                let coordinate = await StopGeocoder.geocode(name: name, near: destination)
+                let coordinate = await StopGeocoder.geocode(name: name, near: destination, center: center)
                 guard !Task.isCancelled else { return }
                 update(id) {
                     $0.latitude = coordinate?.latitude
@@ -93,11 +96,12 @@ private final class ImportModel {
     }
 
     func relocate(_ id: UUID) {
-        let destination = draft.destination
+        let destination = draft.destinationPlace?.name ?? draft.destination
+        let center = draft.destinationPlace?.coordinate
         guard let name = stop(id)?.name, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         update(id) { $0.locateState = .locating }
         Task {
-            let coordinate = await StopGeocoder.geocode(name: name, near: destination)
+            let coordinate = await StopGeocoder.geocode(name: name, near: destination, center: center)
             update(id) {
                 $0.latitude = coordinate?.latitude
                 $0.longitude = coordinate?.longitude
@@ -158,10 +162,12 @@ private final class ImportModel {
         let last = calendar.date(byAdding: .day, value: dayCount - 1, to: first) ?? first
         let trip = Trip(
             name: draft.name.trimmingCharacters(in: .whitespacesAndNewlines),
-            destination: draft.destination.trimmingCharacters(in: .whitespacesAndNewlines),
+            destination: (draft.destinationPlace?.name ?? draft.destination).trimmingCharacters(in: .whitespacesAndNewlines),
             startDate: first,
             endDate: last
         )
+        trip.destinationLatitude = draft.destinationPlace?.latitude
+        trip.destinationLongitude = draft.destinationPlace?.longitude
         context.insert(trip)
 
         for (dayIndex, draftDay) in draft.days.enumerated() {
@@ -237,6 +243,7 @@ struct ImportItineraryView: View {
                         .buttonStyle(.glassProminent)
                         .disabled(
                             model.draft.name.trimmingCharacters(in: .whitespaces).isEmpty
+                                || model.draft.destinationPlace == nil
                                 || model.draft.stopCount == 0
                         )
                     }
@@ -326,7 +333,7 @@ struct ImportItineraryView: View {
         Form {
             Section("Trip") {
                 TextField("Name", text: $model.draft.name)
-                TextField("Destination", text: $model.draft.destination)
+                DestinationField(place: $model.draft.destinationPlace, initialText: model.draft.destination)
                 DatePicker("Starts", selection: $model.startDate, displayedComponents: .date)
                 Button("Find places again near destination") { model.locateAll(force: true) }
                     .disabled(model.draft.stopCount == 0)
@@ -370,6 +377,10 @@ struct ImportItineraryView: View {
                     }
                 }
             }
+        }
+        // A different destination changes where every stop is searched for.
+        .onChange(of: model.draft.destinationPlace) { _, new in
+            if new != nil { model.locateAll(force: true) }
         }
     }
 

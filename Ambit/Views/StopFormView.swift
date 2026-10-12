@@ -156,7 +156,7 @@ struct StopFormView: View {
     private func locate() async {
         isLocating = true
         locationNotFound = false
-        coordinate = await StopGeocoder.geocode(name: name, near: trip.destination)
+        coordinate = await StopGeocoder.geocode(name: name, near: trip.destination, center: trip.destinationCoordinate)
         locationNotFound = coordinate == nil
         isLocating = false
     }

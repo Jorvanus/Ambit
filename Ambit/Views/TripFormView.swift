@@ -8,7 +8,7 @@ struct TripFormView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String
-    @State private var destination: String
+    @State private var destinationPlace: ResolvedPlace?
     @State private var startDate: Date
     @State private var endDate: Date
     @State private var pace: Pace
@@ -19,7 +19,11 @@ struct TripFormView: View {
     init(existingTrip: Trip? = nil) {
         self.existingTrip = existingTrip
         _name = State(initialValue: existingTrip?.name ?? "")
-        _destination = State(initialValue: existingTrip?.destination ?? "")
+        _destinationPlace = State(initialValue: existingTrip.flatMap { trip in
+            trip.destinationCoordinate.map {
+                ResolvedPlace(name: trip.destination, latitude: $0.latitude, longitude: $0.longitude)
+            }
+        })
         _startDate = State(initialValue: existingTrip?.startDate ?? Date())
         _endDate = State(initialValue: existingTrip?.endDate ?? Date().addingTimeInterval(60 * 60 * 24 * 3))
         _pace = State(initialValue: existingTrip?.pace ?? .chill)
@@ -31,7 +35,7 @@ struct TripFormView: View {
             Form {
                 Section("Trip") {
                     TextField("Name", text: $name)
-                    TextField("Destination", text: $destination)
+                    DestinationField(place: $destinationPlace, initialText: existingTrip?.destination ?? "")
                 }
                 Section("Dates") {
                     DatePicker("Start", selection: $startDate, displayedComponents: .date)
@@ -55,8 +59,13 @@ struct TripFormView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { requestSave() }
                         .buttonStyle(.glassProminent)
-                        .disabled(name.isEmpty || destination.isEmpty)
+                        .disabled(name.isEmpty || destinationPlace == nil)
                 }
+            }
+            .task {
+                // Trips made before destinations were resolved hold free text; find them on the map.
+                guard let existingTrip, destinationPlace == nil else { return }
+                destinationPlace = await DestinationResolver.resolve(text: existingTrip.destination)
             }
             .confirmationDialog(
                 "Move stops from removed days?",
@@ -93,6 +102,8 @@ struct TripFormView: View {
     }
 
     private func save() {
+        guard let destinationPlace else { return }
+        let destination = destinationPlace.name
         let trip = existingTrip ?? Trip(
             name: name,
             destination: destination,
@@ -113,6 +124,8 @@ struct TripFormView: View {
                 budget: Double(budgetText),
                 in: modelContext
             )
+            trip.destinationLatitude = destinationPlace.latitude
+            trip.destinationLongitude = destinationPlace.longitude
             try modelContext.save()
             dismiss()
         } catch {

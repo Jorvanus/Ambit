@@ -78,4 +78,20 @@ struct ItineraryLogicTests {
 
         #expect(optimized.map(\.id) == [first.id, fast.id, slow.id, last.id])
     }
+
+    @Test func daySelectionPrefersTodayThenNearestTripDay() {
+        let first = Day(date: day)
+        let second = Day(date: calendar.date(byAdding: .day, value: 1, to: day)!)
+        let last = Day(date: calendar.date(byAdding: .day, value: 2, to: day)!)
+        let days = [last, first, second]
+
+        #expect(TripDaySelection.preferredDayID(in: days, now: time(12, 0), calendar: calendar) == first.id)
+        #expect(TripDaySelection.preferredDayID(
+            in: days, now: calendar.date(byAdding: .day, value: -2, to: day)!, calendar: calendar
+        ) == first.id)
+        #expect(TripDaySelection.preferredDayID(
+            in: days, now: calendar.date(byAdding: .day, value: 4, to: day)!, calendar: calendar
+        ) == last.id)
+        #expect(TripDaySelection.preferredDayID(in: [], now: day, calendar: calendar) == nil)
+    }
 }

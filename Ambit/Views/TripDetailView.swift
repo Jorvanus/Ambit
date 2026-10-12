@@ -22,10 +22,25 @@ private enum TripSheet: Identifiable {
     }
 }
 
+enum TripDaySelection {
+    static func preferredDayID(
+        in days: [Day],
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> UUID? {
+        let ordered = days.sorted { $0.date < $1.date }
+        let today = calendar.startOfDay(for: now)
+        return ordered.first { calendar.isDate($0.date, inSameDayAs: now) }?.id
+            ?? ordered.first { calendar.startOfDay(for: $0.date) > today }?.id
+            ?? ordered.last?.id
+    }
+}
+
 struct TripDetailView: View {
     @Bindable var trip: Trip
 
     @State private var tab: TripTab = .itinerary
+    @State private var selectedDayID: UUID?
     @State private var isPresentingEditTrip = false
     // Sheets live here, not on the list sections: a sheet attached inside a
     // List row is dismissed whenever that row re-renders (e.g. when walking
@@ -36,42 +51,76 @@ struct TripDetailView: View {
         trip.days.sorted { $0.date < $1.date }
     }
 
+    private var selectedDay: Day? {
+        sortedDays.first { $0.id == selectedDayID }
+    }
+
+    init(trip: Trip) {
+        self.trip = trip
+        _selectedDayID = State(initialValue: TripDaySelection.preferredDayID(in: trip.days))
+    }
+
     var body: some View {
         Group {
             switch tab {
             case .itinerary:
                 List {
-                    PlacesSection(
-                        trip: trip,
-                        onAdd: { sheet = .newStop(nil) },
-                        onEdit: { sheet = .editStop($0) }
-                    )
-                    ForEach(sortedDays) { day in
+                    if let selectedDay {
                         DaySection(
-                            day: day,
-                            onAdd: { sheet = .newStop(day) },
+                            day: selectedDay,
+                            onAdd: { sheet = .newStop(selectedDay) },
                             onEdit: { sheet = .editStop($0) }
                         )
+                        PlacesSection(
+                            trip: trip,
+                            onAdd: { sheet = .newStop(nil) },
+                            onEdit: { sheet = .editStop($0) }
+                        )
+                    } else {
+                        PlacesSection(
+                            trip: trip,
+                            onAdd: { sheet = .newStop(nil) },
+                            onEdit: { sheet = .editStop($0) }
+                        )
+                        ForEach(sortedDays) { day in
+                            DaySection(
+                                day: day,
+                                onAdd: { sheet = .newStop(day) },
+                                onEdit: { sheet = .editStop($0) }
+                            )
+                        }
                     }
                 }
             case .map:
-                TripMapView(trip: trip)
+                TripMapView(trip: trip, selectedDayID: $selectedDayID)
             case .budget:
                 TripBudgetView(trip: trip)
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            Picker("Section", selection: $tab) {
-                ForEach(TripTab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
+            VStack(spacing: 0) {
+                Picker("Section", selection: $tab) {
+                    ForEach(TripTab.allCases) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                if tab == .itinerary, !sortedDays.isEmpty {
+                    TripDayPicker(days: sortedDays, selectedDayID: $selectedDayID)
                 }
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            .background(.regularMaterial)
+        }
+        .onChange(of: sortedDays.map(\.id)) { _, dayIDs in
+            if let selectedDayID, !dayIDs.contains(selectedDayID) {
+                self.selectedDayID = TripDaySelection.preferredDayID(in: sortedDays)
+            }
         }
         .navigationTitle(trip.name)
         .navigationSubtitle(trip.destination)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -97,6 +146,78 @@ struct TripDetailView: View {
                 StopFormView(trip: trip, day: stop.day, existingStop: stop)
             }
         }
+    }
+}
+
+private enum TripDayPickerID: Hashable {
+    case all
+    case day(UUID)
+}
+
+private struct TripDayPicker: View {
+    let days: [Day]
+    @Binding var selectedDayID: UUID?
+
+    private var selectedPickerID: TripDayPickerID {
+        selectedDayID.map(TripDayPickerID.day) ?? .all
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    Button {
+                        selectedDayID = nil
+                    } label: {
+                        dateLabel(top: "All", bottom: "days", isSelected: selectedDayID == nil)
+                    }
+                    .buttonStyle(.glass)
+                    .tint(selectedDayID == nil ? .accentColor : nil)
+                    .accessibilityLabel("All days")
+                    .accessibilityAddTraits(selectedDayID == nil ? .isSelected : [])
+                    .id(TripDayPickerID.all)
+
+                    ForEach(days) { day in
+                        let isSelected = selectedDayID == day.id
+                        Button {
+                            selectedDayID = day.id
+                        } label: {
+                            dateLabel(
+                                top: Calendar.current.isDateInToday(day.date)
+                                    ? "Today" : day.date.formatted(.dateTime.weekday(.abbreviated)),
+                                bottom: day.date.formatted(.dateTime.month(.abbreviated).day()),
+                                isSelected: isSelected
+                            )
+                        }
+                        .buttonStyle(.glass)
+                        .tint(isSelected ? .accentColor : nil)
+                        .accessibilityLabel(day.date.formatted(date: .complete, time: .omitted))
+                        .accessibilityAddTraits(isSelected ? .isSelected : [])
+                        .id(TripDayPickerID.day(day.id))
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+            }
+            .scrollIndicators(.hidden, axes: .horizontal)
+            .onAppear { proxy.scrollTo(selectedPickerID, anchor: .center) }
+            .onChange(of: selectedDayID) { _, _ in
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(selectedPickerID, anchor: .center)
+                }
+            }
+        }
+    }
+
+    private func dateLabel(top: String, bottom: String, isSelected: Bool) -> some View {
+        VStack(spacing: 2) {
+            Text(top).font(.caption.weight(isSelected ? .bold : .medium))
+            Text(bottom).font(.subheadline.weight(isSelected ? .semibold : .regular))
+        }
+        .frame(minWidth: 62)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 }
 
@@ -173,8 +294,9 @@ private struct DaySection: View {
         DaySchedule.conflicts(for: stops, on: day.date, walkingLegs: legs)
     }
 
-    private var summary: String {
-        var parts = ["\(stops.count) \(stops.count == 1 ? "stop" : "stops")"]
+    private var walkingSummary: String {
+        if stops.isEmpty { return "No walking planned" }
+        if stops.count == 1 { return "No walk between stops" }
         var time: TimeInterval = 0
         var distance: Double = 0
         var hasLegs = false
@@ -193,18 +315,24 @@ private struct DaySection: View {
                 distance += from.location.distance(from: to.location)
             }
         }
-        if hasLegs {
-            parts.append("\(hasEstimatedLeg ? "about " : "")\(Int((time / 60).rounded())) min walking")
-            parts.append(String(format: "%.1f km", distance / 1000))
-        }
-        if !timingConflicts.isEmpty {
-            parts.append("\(timingConflicts.count) timing \(timingConflicts.count == 1 ? "conflict" : "conflicts")")
-        }
-        let toBook = stops.filter { $0.bookingStatus == .required }.count
-        if toBook > 0 {
-            parts.append("\(toBook) to book")
-        }
-        return parts.joined(separator: " · ")
+        guard hasLegs else { return "Walking time unavailable" }
+        let estimate = hasEstimatedLeg ? "About " : ""
+        let minutes = Int((time / 60).rounded())
+        return "\(estimate)\(minutes) min walking · \(String(format: "%.1f km", distance / 1000))"
+    }
+
+    private var bookingSummary: String {
+        let count = stops.filter { $0.bookingStatus != .none }.count
+        let required = stops.filter { $0.bookingStatus == .required }.count
+        guard count > 0 else { return "No bookings" }
+        let bookings = "\(count) \(count == 1 ? "booking" : "bookings")"
+        return required > 0 ? "\(bookings), \(required) to book" : bookings
+    }
+
+    private var conflictSummary: String {
+        let count = timingConflicts.count
+        guard count > 0 else { return "No timing conflicts" }
+        return "\(count) timing \(count == 1 ? "conflict" : "conflicts")"
     }
 
     var body: some View {
@@ -246,20 +374,42 @@ private struct DaySection: View {
                 }
             }
         } header: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(day.date.formatted(date: .abbreviated, time: .omitted))
-                if !stops.isEmpty {
-                    Text(summary)
-                        .font(.caption)
-                        .textCase(nil)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(day.date.formatted(date: .complete, time: .omitted))
+                    .font(.headline)
+                    .textCase(nil)
+                    .foregroundStyle(.primary)
+                LazyVGrid(
+                    columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    dayMetric("\(stops.count) \(stops.count == 1 ? "stop" : "stops")", systemImage: "mappin.and.ellipse")
+                    dayMetric(walkingSummary, systemImage: "figure.walk")
+                    dayMetric(bookingSummary, systemImage: "ticket")
+                    dayMetric(
+                        conflictSummary,
+                        systemImage: timingConflicts.isEmpty ? "checkmark.circle" : "exclamationmark.triangle.fill",
+                        color: timingConflicts.isEmpty ? .secondary : .orange
+                    )
                 }
+                .font(.subheadline)
+                .textCase(nil)
             }
+            .padding(.vertical, 6)
         }
+        .headerProminence(.increased)
         .task(id: routeSignature) {
             await refreshLegs()
         }
     }
+
+    private func dayMetric(_ title: String, systemImage: String, color: Color = .primary) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.subheadline)
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
+        }
 
     private func refreshLegs() async {
         let currentStops = stops

@@ -10,8 +10,8 @@ private struct MapRoutePair: Identifiable {
 
 struct TripMapView: View {
     let trip: Trip
+    @Binding var selectedDayID: UUID?
 
-    @State private var selectedDayID: UUID?
     @State private var position: MapCameraPosition = .automatic
     @State private var walkingRoutes: [StopLegID: WalkingLeg] = [:]
 
@@ -104,7 +104,7 @@ struct TripMapView: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal) {
                 GlassEffectContainer {
                     HStack(spacing: 8) {
                         chip("All", dayID: nil, tint: .accentColor)
@@ -120,6 +120,7 @@ struct TripMapView: View {
                     .padding(.vertical, 8)
                 }
             }
+            .scrollIndicators(.hidden, axes: .horizontal)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if visibleRoutePairs.contains(where: { walkingRoutes[$0.id]?.path.isEmpty != false }) {

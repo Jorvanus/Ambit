@@ -194,20 +194,32 @@ struct StopFormView: View {
         if isNewHome {
             if let targetDay {
                 stop.poolTrip = nil
-                stop.sortOrder = targetDay.stops.count
+                stop.sortOrder = Self.nextSortOrder(in: targetDay.stops)
                 stop.day = targetDay
             } else {
                 stop.day = nil
-                stop.sortOrder = trip.savedPlaces.count
+                stop.sortOrder = Self.nextSortOrder(in: trip.savedPlaces)
                 stop.poolTrip = trip
             }
         }
         dismiss()
     }
 
+    /// One past the highest existing order, not `count`: orders can have gaps
+    /// (a stop moved or deleted elsewhere), and `count` would then collide.
+    private static func nextSortOrder(in stops: [Stop]) -> Int {
+        (stops.map(\.sortOrder).max() ?? -1) + 1
+    }
+
     private func delete() {
         if let existingStop {
+            let siblings = (existingStop.day?.stops ?? existingStop.poolTrip?.savedPlaces ?? [])
+                .filter { $0 !== existingStop }
+                .sorted { $0.sortOrder < $1.sortOrder }
             modelContext.delete(existingStop)
+            for (index, sibling) in siblings.enumerated() {
+                sibling.sortOrder = index
+            }
         }
         dismiss()
     }
